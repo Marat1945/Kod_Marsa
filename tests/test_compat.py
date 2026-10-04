@@ -21,6 +21,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import marscore as core  # noqa: E402
 
+# На Windows-сервере GitHub вывод идёт в кодировке cp1252, и русский текст
+# роняет программу. Переключаем вывод на UTF-8.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 
 def unb64(s):
     return base64.b64decode(s).decode("utf-8")
@@ -106,4 +114,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as exc:  # сообщение попадёт в сводку GitHub Actions
+        print(f"::error::Проверка совместимости упала: {exc!r}")
+        raise
