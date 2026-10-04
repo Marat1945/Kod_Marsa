@@ -10,9 +10,9 @@ on:
 permissions:
   contents: write
 
-defaults:
-  run:
-    shell: pwsh
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
 
 jobs:
   build:
@@ -20,52 +20,105 @@ jobs:
     steps:
       - name: Получить файлы репозитория
         uses: actions/checkout@v4
-
-      - name: Найти папку с программой
-        run: |
-          $f = Get-ChildItem -Path . -Recurse -Filter kod_marsa.py | Select-Object -First 1
-          if (-not $f) {
-            $zip = Get-ChildItem -Path . -Recurse -Filter *.zip | Select-Object -First 1
-            if ($zip) {
-              Write-Host "Распаковываю архив $($zip.Name)"
-              Expand-Archive -Path $zip.FullName -DestinationPath _unzipped -Force
-              $f = Get-ChildItem -Path _unzipped -Recurse -Filter kod_marsa.py | Select-Object -First 1
-            }
-          }
-          if (-not $f) {
-            Write-Error "В репозитории нет файла kod_marsa.py. Загрузите файлы из архива kod-marsa-exe."
-            exit 1
-          }
-          $dir = $f.DirectoryName -replace '\\', '/'
-          Write-Host "Папка программы: $dir"
-          "PROJ=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        with:
+          fetch-depth: 0
 
       - name: Установить Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+      - name: Найти программу (архив kod-marsa-exe.zip или файлы)
+        shell: python
+        run: |
+          import os, pathlib, subprocess, sys, zipfile
+
+          root = pathlib.Path.cwd()
+          skip = {".git", "_build"}
+
+          def files(pattern):
+              return [p for p in root.rglob(pattern) if not skip.intersection(p.relative_to(root).parts)]
+
+          def commit_time(path):
+              try:
+                  out = subprocess.run(["git", "log", "-1", "--format=%ct", "--", path.relative_to(root).as_posix()],
+                                       capture_output=True, text=True, cwd=root).stdout.strip()
+                  return int(out or 0)
+              except Exception:
+                  return 0
+
+          archives = []
+          for z in files("*.zip"):
+              try:
+                  with zipfile.ZipFile(z) as zf:
+                      if any(n.endswith("kod_marsa.py") for n in zf.namelist()):
+                          archives.append((commit_time(z), z))
+              except zipfile.BadZipFile:
+                  pass
+
+          if archives:
+              archives.sort(key=lambda item: item[0], reverse=True)
+              source = archives[0][1]
+              with zipfile.ZipFile(source) as zf:
+                  zf.extractall(root / "_build")
+              candidates = list((root / "_build").rglob("kod_marsa.py"))
+              print("Программа взята из архива", source.relative_to(root).as_posix())
+          else:
+              candidates = files("kod_marsa.py")
+              if candidates:
+                  print("Программа взята из файлов репозитория")
+
+          if not candidates:
+              print("::error::В репозитории нет программы. Загрузите архив kod-marsa-exe.zip: Code, Add file, Upload files.")
+              sys.exit(1)
+
+          proj = min(candidates, key=lambda p: len(p.parts)).parent
+          need = ["kod_marsa.py", "marscore.py", "requirements.txt", "tests/test_compat.py",
+                  "tests/android_vectors.tsv", "assets/icon.ico", "assets/form_blank.png"]
+          missing = [n for n in need if not (proj / n).exists()]
+          if missing:
+              print("::error::Не хватает файлов программы: " + ", ".join(missing) + ". Загрузите архив kod-marsa-exe.zip целиком.")
+              sys.exit(1)
+          print("Папка программы:", proj.as_posix())
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
+              fh.write(f"PROJ={proj.as_posix()}\n")
+
       - name: Установить библиотеки
         working-directory: ${{ env.PROJ }}
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller==6.22.3
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Не удалось установить библиотеки Python"; exit 1 }
 
       - name: Проверка совместимости с Android-версией
         working-directory: ${{ env.PROJ }}
-        run: python tests/test_compat.py
+        shell: pwsh
+        run: |
+          python tests/test_compat.py
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Проверка совместимости с телефоном не пройдена"; exit 1 }
 
       - name: Собрать EXE
         working-directory: ${{ env.PROJ }}
-        run: pyinstaller --noconfirm --clean --onefile --windowed --name KodMarsa --icon assets/icon.ico --add-data "assets;assets" --collect-all tkinterdnd2 --collect-all zxingcpp kod_marsa.py
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed --name KodMarsa --icon assets/icon.ico --add-data "assets;assets" --collect-all tkinterdnd2 --collect-all zxingcpp kod_marsa.py
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::PyInstaller не смог собрать EXE"; exit 1 }
 
       - name: Самопроверка готового EXE
         working-directory: ${{ env.PROJ }}
+        shell: python
         timeout-minutes: 5
         run: |
-          $p = Start-Process -FilePath "dist\KodMarsa.exe" -ArgumentList "--selftest" -Wait -PassThru
-          if (Test-Path "dist\selftest.log") { Get-Content "dist\selftest.log" -Encoding UTF8 }
-          if ($p.ExitCode -ne 0) { Write-Error "Самопроверка не пройдена, код $($p.ExitCode)"; exit 1 }
+          import pathlib, subprocess, sys
+          exe = pathlib.Path("dist", "KodMarsa.exe").resolve()
+          code = subprocess.run([str(exe), "--selftest"], timeout=240).returncode
+          log = pathlib.Path("dist", "selftest.log")
+          if log.exists():
+              print(log.read_text(encoding="utf-8"))
+          if code != 0:
+              print(f"::error::Самопроверка EXE не пройдена, код {code}")
+              sys.exit(1)
 
       - name: Выложить EXE (раздел Artifacts)
         uses: actions/upload-artifact@v4
