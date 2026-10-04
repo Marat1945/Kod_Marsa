@@ -22,7 +22,7 @@ import os
 import re
 
 APP_NAME = "Код Марса"
-APP_VERSION = "1.0"
+APP_VERSION = "1.1"
 
 
 class MarsError(Exception):

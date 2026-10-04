@@ -95,6 +95,45 @@ def main():
     for _, _, cipher, _ in vectors[:6]:
         check(core.read_qr(core.qr_image(core.qr_matrix(cipher), 4)) == [cipher], "QR не распознан")
 
+    # азбука Морзе: шифровка звучит так же, как на телефоне, все разделители читаются
+    import io
+    import re
+    import zipfile
+    import marsform as forms
+    import marsmorse as morse
+
+    for _, _, cipher, morse_android in vectors[:8]:
+        if morse_android != "-":
+            check(morse.encode(cipher, "auto", "space_slash")[0] == morse_android, "морзянка не как на телефоне")
+        for sep in morse.SEPARATOR_MAP:
+            check(morse.latin_text(morse.encode(cipher, "latin", sep)[0]) == cipher, f"разделители {sep}")
+    for text, lang in (("Привет, как дела? Встречаемся завтра у реки в шесть вечера", "russian"),
+                       ("Hello, how are you? We meet tomorrow near the river at six", "latin"),
+                       ("Привіт, як справи? Зустрічаємося завтра біля річки о шостій вечора", "ukrainian")):
+        check(morse.decode(morse.encode(text)[0])[1] == lang, f"автоопределение языка: {lang}")
+    events, total_ms = morse.timeline(morse.encode("PARIS", "latin")[0], morse.DEFAULTS)
+    check(abs(events[-1][0] + events[-1][1] - morse.LEAD_MS - 43 * 80) < 1e-6, "длительность PARIS на 15 WPM")
+    wav = io.BytesIO()
+    morse.render_wav(events, total_ms, morse.DEFAULTS, wav)
+    check(len(wav.getvalue()) > 10000, "звук Морзе")
+
+    # бланк: листы по 112 групп, номера, копирование из Word без пробелов
+    form = os.path.join(os.path.dirname(HERE), "assets", "form_blank.png")
+    long_cipher = core.b32encode(core.encrypt("Проверка листов бланка. " * 30, core.key_bytes(7)))
+    groups = forms.groups_of(long_cipher)
+    pages = forms.paginate(groups)
+    check(len(pages) > 1 and all(len(p) == forms.PER_PAGE for p in pages[:-1]), "деление на листы")
+    check(forms.form_number(__import__("datetime").datetime(2026, 10, 4), 1) == "041026/001", "номер бланка")
+    images = forms.render_png_pages(form, long_cipher, "ванька", "041026/001")
+    check(len(images) == len(pages), "листы PNG")
+    docx = io.BytesIO()
+    forms.build_docx(form, long_cipher, "ванька", "041026/001", docx)
+    xml = zipfile.ZipFile(docx).read("word/document.xml").decode("utf-8")
+    texts = ["".join(re.findall(r'<w:t xml:space="preserve">(.*?)</w:t>', p))
+             for p in re.findall(r"<w:p>(.*?)</w:p>", xml) if 'w:line="480"' in p]
+    check(texts == ["".join(p) for p in pages], "Word: шифровка копируется без пробелов")
+    check("Ключ: ванька" in xml and "041026/001" in xml, "Word: номер и ключ на бланке")
+
     total = len(vectors)
     if errors:
         print("ОШИБКИ:")
