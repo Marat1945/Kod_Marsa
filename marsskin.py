@@ -18,6 +18,7 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageStat, ImageTk
 import kod_marsa as km
 import marscore as core
 import marsi18n as i18n
+import marsmenu
 from marsi18n import T
 
 W0, H0, FRAMES = 1672, 941, 48
@@ -30,14 +31,17 @@ QR_CARD = (1350, 426, 1648, 668)
 COMBO = (40, 726, 590, 767)
 NOTE = (40, 772, 600, 820)
 TOP_LAMP = (1192, 60)
+SND_LAMP, MP3_LAMP = (882, 551), (957, 551)
+BACK, FWD = (492, 60), (530, 60)
 STAR = (1495, 124)
 HOT = {
     "menu": (25, 21, 86, 92), "lang": (1205, 34, 1366, 86), "help": (1374, 34, 1493, 86),
     "min": (1525, 38, 1560, 78), "max": (1563, 38, 1601, 78), "close": (1604, 38, 1645, 78),
     "clear_all": (490, 118, 631, 158), "copy1": (1036, 120, 1162, 160), "paste": (1176, 120, 1292, 160),
     "rb_list": (166, 672, 334, 712), "rb_phrase": (345, 672, 497, 712), "combo": (40, 726, 626, 767),
-    "encrypt": (34, 824, 316, 901), "decrypt": (344, 824, 631, 901), "sound_lamp": (862, 530, 902, 570),
-    "speaker": (902, 528, 944, 574), "morse_save": (944, 528, 1047, 574), "copy_morse": (1065, 528, 1171, 571),
+    "encrypt": (34, 824, 316, 901), "decrypt": (344, 824, 631, 901), "sound": (864, 528, 934, 574),
+    "morse_save": (938, 528, 1060, 574), "copy_morse": (1065, 528, 1171, 571),
+    "back": (473, 41, 511, 79), "fwd": (511, 41, 549, 79),
     "morse_settings": (1186, 528, 1303, 574), "sstv_save": (1338, 687, 1653, 726), "sstv": (1338, 733, 1530, 783),
     "sstv_mode": (1541, 733, 1653, 783), "save_qr": (1338, 790, 1437, 832), "copy_qr": (1447, 790, 1552, 832),
     "open_qr": (1561, 790, 1653, 832), "form_png": (1338, 842, 1493, 901), "form_doc": (1498, 842, 1653, 901),
@@ -59,7 +63,7 @@ def _labels():
         "msg_plate": (U("Сообщение"), INK, 24, "cond"), "clear_all": (U("Очистить всё"), CREAM, 15, "cond"),
         "b32_plate": (U("Шифровка Base32").replace("BASE32", "Base32"), INK, 24, "cond"),
         "copy1": (U("Копировать"), CREAM, 13, "cond"), "paste": (U("Вставить"), CREAM, 13, "cond"),
-        "morse_plate": (U("Азбука Морзе"), INK, 24, "cond"), "morse_save": (T("Сохранить\nMorse.mp3"), INK, 13, "cond"),
+        "morse_plate": (U("Азбука Морзе"), INK, 24, "cond"),
         "copy_morse": (U("Копировать"), CREAM, 14, "cond"),
         "morse_settings": (U("Настройка\nазбуки Морзе"), INK, 12, "cond"), "key_plate": (U("Ключ"), INK, 24, "cond"),
         "rb_list": (T("Выбрать ключ"), CREAM, 16, "cond"), "rb_phrase": (T("Ключ-фраза"), CREAM, 16, "cond"),
@@ -106,15 +110,21 @@ class SkinApp(km.App):
         self._skin_k = None
         self._guide_win = None
         super().__init__(root)
-        root.overrideredirect(True)
+        if sys.platform == "win32":  # обычное окно без системной рамки: значок на панели задач остаётся
+            try:
+                root.attributes("-alpha", 0.0)
+            except tk.TclError:
+                pass
+        else:
+            root.overrideredirect(True)
         root.bind("<Alt-F4>", lambda e: self._on_close())
 
     # ------------------------------------------------------------------ размеры, шрифты, картинки
     def _make_fonts(self):
         super()._make_fonts()
         r = self.root
-        sw, sh = r.winfo_screenwidth(), r.winfo_screenheight()
-        self.k = min(sw / W0, sh / H0) if self._maxed else min(1.0, (sw - 24) / W0, (sh - 64) / H0)
+        _, _, ww, wh = self._work_area()
+        self.k = min(ww / W0, wh / H0) if self._maxed else min(1.0, (ww - 24) / W0, (wh - 16) / H0)
         fams = {f.lower(): f for f in tkfont.families(r)}
 
         def pick(*names):
@@ -126,6 +136,32 @@ class SkinApp(km.App):
                     "mono": pick("Consolas", "DejaVu Sans Mono", "Courier New"),
                     "sans": pick("Segoe UI", "DejaVu Sans", "Arial")}
         self.cond_weight = "normal" if "Bahnschrift" in self.fam["cond"] else "bold"
+
+    def _work_area(self):
+        """Экран без панели задач."""
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                from ctypes import wintypes
+                rect = wintypes.RECT()
+                if ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):
+                    return rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+            except Exception:
+                pass
+        r = self.root
+        return 0, 0, r.winfo_screenwidth(), r.winfo_screenheight() - 48
+
+    def _menu(self, parent=None):
+        m = marsmenu.MarsMenu(self, parent if isinstance(parent, marsmenu.MarsMenu) else None)
+        m.mark, self._mark_next = getattr(self, "_mark_next", None), None
+        return m
+
+    def _sstv_menu(self):
+        self._mark_next = self.sstv_mode  # выбранная модель горит красной лампой
+        super()._sstv_menu()
+
+    def _menu_paper(self, w, h):
+        return marsmenu.paper_for(self._skin["clean"], self._r((60, 200, 600, 580)), (w, h))
 
     def kp(self, v):
         return max(1, int(round(v * self.k)))
@@ -233,9 +269,8 @@ class SkinApp(km.App):
                 r.iconphoto(True, self._icon_photo)
         except tk.TclError:
             pass
-        sw, sh = r.winfo_screenwidth(), r.winfo_screenheight()
-        top = 0 if self._maxed else self.kp(16)
-        r.geometry(f"{W}x{H}+{max(0, (sw - W) // 2)}+{max(0, (sh - H) // 2 - top)}")
+        wx, wy, ww, wh = self._work_area()
+        r.geometry(f"{W}x{H}+{wx + max(0, (ww - W) // 2)}+{wy + max(0, (wh - H) // 2)}")
         r.resizable(False, False)
         cv = self.cv = tk.Canvas(r, width=W, height=H, bd=0, highlightthickness=0, bg="#14110E")
         cv.place(x=0, y=0)
@@ -252,22 +287,37 @@ class SkinApp(km.App):
         self._tape_full = T("шифрование • передача • безопасность").upper()
         self._tape_text = cv.create_text(tx0 + self.kp(12), (ty0 + ty1) // 2 + 1, anchor="w", text="",
                                          fill="#2B2219", font=self.font("type", 17, "bold"))
+        self._nav = {}
+        for name, xy in (("back", BACK), ("fwd", FWD)):  # ручки истории: ◀ назад, ▶ вперёд
+            p = self._r(xy)
+            cv.create_image(*p, image=self._lamp_img("off", 0.84), tags=("lamp",))
+            s, d = self.kp(6), (-1 if name == "back" else 1)
+            pts = (p[0] - d * s * 0.6, p[1] - s, p[0] + d * s * 0.9, p[1], p[0] - d * s * 0.6, p[1] + s)
+            self._nav[name] = cv.create_polygon(*pts, fill="#5C5248", outline="#1E1A16", tags=("lamp",))
         if not ru:
             for name, (text, color, size, kind) in _labels().items():
                 self._label(m["labels"][name], text, color, size, kind, anchor="w" if name == "shift_note" else "center")
         lx0, ly0, lx1, ly1 = m["dynamic"]["lang"]
         self._label((lx0, ly0, lx1 + 8, ly1), T("Язык") + " ▾", CREAM, 18, "cond", tag="dyn")
+        self._label((972, 531, 1056, 573), T("Сохранить\nMorse.mp3"), INK, 13, "cond", tag="dyn")
         # лампы
         self.lamp_xy = {n: self._r(xy) for n, xy in m["lamps"].items()}
         self.lamp_xy["top"] = self._r(TOP_LAMP)
         self._top_halo = cv.create_image(*self.lamp_xy["top"], image=self._halo((255, 60, 30), 26, 0.7), tags=("lamp",))
         cv.create_image(*self.lamp_xy["top"], image=self._lamp_img("red", 0.55), tags=("lamp",))
         self._lamp_items = {}
-        self._snd_item = cv.create_image(*self.lamp_xy["morse"], image=self._snd_frames[0], tags=("lamp",))
+        self.lamp_xy.update(snd=self._r(SND_LAMP), mp3=self._r(MP3_LAMP))
+        self._snd_item = cv.create_image(*self.lamp_xy["snd"], image=self._snd_frames[0], tags=("lamp",))
+        self._snd_bulb = cv.create_image(*self.lamp_xy["snd"], tags=("lamp",))
         # поля
         self.msg = self._paper(TEXT["msg"], self.font("type", 17), "word")
         self.b32 = self._paper(TEXT["b32"], self.font("mono", 16), "char")
         self.morse = self._paper(TEXT["morse"], self.font("mono", 16, "bold"), "word")
+        hl = "#EDB49C"  # подсветка передачи: прозвучавшее — красным с подчёркиванием, текущий знак — фоном
+        self.b32.tag_configure("sent", foreground="#B3160C", underline=True)
+        self.b32.tag_configure("sending", foreground="#B3160C", background=hl, underline=True)
+        self.morse.tag_configure("played", foreground="#B3160C", underline=True)
+        self.morse.tag_configure("current", background=hl)
         x0, y0, x1, y1 = self._r(TEXT["status"])
         self.status = tk.Label(cv, text="", bg=self.paper, fg="#6B6052", font=self.font("sans", 13), anchor="w")
         cv.create_window(x0, y0, window=self.status, anchor="nw", width=x1 - x0, height=y1 - y0)
@@ -298,8 +348,9 @@ class SkinApp(km.App):
             "paste": lambda: (self._flash("paste"), self.paste_cipher()),
             "rb_list": lambda: self._set_mode("list"), "rb_phrase": lambda: self._set_mode("phrase"),
             "combo": self._combo_open, "encrypt": lambda: (self._flash("encrypt", 1.1), self.encrypt()),
-            "decrypt": lambda: (self._flash("decrypt", 1.1), self.decrypt_manual()), "sound_lamp": self.toggle_sound,
-            "speaker": self.toggle_sound, "morse_save": self.save_morse_mp3,
+            "decrypt": lambda: (self._flash("decrypt", 1.1), self.decrypt_manual()), "sound": self.toggle_sound,
+            "morse_save": lambda: (self._flash("mp3", 0.62, "orange"), self.save_morse_mp3()),
+            "back": self.history_back, "fwd": self.history_forward,
             "copy_morse": lambda: self._copy(self.morse_get(), T("Морзянка скопирована")),
             "morse_settings": self.show_morse_settings, "sstv_save": self.save_sstv_mp3, "sstv": self._sstv_click,
             "sstv_mode": self._sstv_menu, "save_qr": self.save_qr, "copy_qr": self.copy_qr, "open_qr": self._open_menu,
@@ -323,10 +374,13 @@ class SkinApp(km.App):
         self._draw_combo()
         self._sstv_buttons()
         self._on_mode()
+        self._update_nav()
         self._bind_widgets()
         self._setup_dnd()
         self._schedule_qr_redraw()
         self._start_anim()
+        if sys.platform == "win32" and r.state() != "withdrawn":
+            r.after(50, self._frameless)
 
     def _paper(self, rect, font, wrap):
         x0, y0, x1, y1 = self._r(rect)
@@ -385,6 +439,8 @@ class SkinApp(km.App):
     def _proxy(self, name, kw):
         if name == "sound" and "image" in kw:
             self.cv.itemconfigure(self._snd_item, image=kw["image"])
+            lit = kw["image"] is not self._snd_frames[0]
+            self.cv.itemconfigure(self._snd_bulb, image=self._lamp_img("orange", 0.62) if lit else "")
         elif name == "sstv":
             self._sstv_text = kw.get("text", self._sstv_text)
             if "state" in kw:
@@ -401,13 +457,14 @@ class SkinApp(km.App):
             self._lamp_items[name] = self.cv.create_image(*self.lamp_xy[name], image=self._lamp_img(kind, factor),
                                                           tags=("lamp",))
 
-    def _flash(self, name, factor=0.78, ms=1200):
+    def _flash(self, name, factor=0.78, kind="red", ms=None):
         """Лампа загорается после нажатия."""
         cv, xy = self.cv, self.lamp_xy[name]
-        bright = 1.0 if name in ("copy1", "paste") else 1.3
-        items = [cv.create_image(*xy, image=self._halo((255, 80, 30), 30, 0.75), tags=("lamp",)),
-                 cv.create_image(*xy, image=self._lamp_img("red", factor, bright), tags=("lamp",))]
-        self.root.after(ms if name in ("copy1", "paste") else 500, lambda: [cv.delete(i) for i in items])
+        steady = name in ("copy1", "paste", "mp3")
+        glow = (255, 160, 40) if kind == "orange" else (255, 80, 30)
+        items = [cv.create_image(*xy, image=self._halo(glow, 30, 0.75), tags=("lamp",)),
+                 cv.create_image(*xy, image=self._lamp_img(kind, factor, 1.0 if steady else 1.3), tags=("lamp",))]
+        self.root.after(ms or (1200 if steady else 500), lambda: [cv.delete(i) for i in items])
 
     def _phrase_changed(self):
         """После того как поле получило новый текст: HEX-ключ, подсказка, строка под полем."""
@@ -434,7 +491,11 @@ class SkinApp(km.App):
             self.phrase_entry.focus_set()
 
     def _update_nav(self):
-        pass  # стрелки истории — в меню ☰ и на Alt+← / Alt+→
+        nav = getattr(self, "_nav", None)
+        if not nav:
+            return
+        for name, ok in (("back", self.hpos > 0), ("fwd", self.hpos < len(self.history) - 1)):
+            self.cv.itemconfigure(nav[name], fill="#FFE9C0" if ok else "#5C5248")
 
     def _sstv_click(self):
         if not self.sstv_mode:
@@ -454,15 +515,14 @@ class SkinApp(km.App):
         self._qr_box = None
         cv.create_image(0, 0, image=self._card_photo, anchor="nw")
         if self.qr_mat is not None:
-            n, cap = len(self.qr_mat), self.kp(30)
-            mod = max(1, min(w - self.kp(60), h - cap - self.kp(36)) // n)
-            size = n * mod
-            self._qr_photo = ImageTk.PhotoImage(core.qr_image(self.qr_mat, mod))
-            qx, qy = (w - size) // 2, max(self.kp(12), (h - cap - size) // 2)
+            cap = self.kp(24)  # QR на всю карточку, подпись под ним
+            size = min(w - self.kp(16), h - cap - self.kp(12))
+            self._qr_photo = ImageTk.PhotoImage(core.qr_image(self.qr_mat, 1).resize((size, size), Image.NEAREST))
+            qx, qy = (w - size) // 2, self.kp(8)
             cv.create_image(qx, qy, image=self._qr_photo, anchor="nw")
             self._qr_box = (qx, qy, qx + size, qy + size)
-            cv.create_text(w // 2, qy + size + cap // 2 + self.kp(2), text=T("Ключ: {key}", key=self._key_label(self.cipher_kid)),
-                           width=w - self.kp(30), font=self.font("type", 15), fill=INK)
+            cv.create_text(w // 2, qy + size + cap // 2 + self.kp(1), text=T("Ключ: {key}", key=self._key_label(self.cipher_kid)),
+                           width=w - self.kp(30), font=self.font("type", 14), fill=INK)
         else:
             text = self._err(self.qr_err) if self.qr_err else T(
                 "Здесь появится QR-код.\nЧтобы расшифровать картинку с QR, перетащите её в окно или нажмите «Открыть QR».")
@@ -586,6 +646,15 @@ class SkinApp(km.App):
         if self._pressed:
             self._overlay(self._pressed, 0.82)
         elif e.y < self.kp(100) and not self._maxed:
+            if sys.platform == "win32":  # окно тащит сама Windows, как за обычный заголовок
+                try:
+                    import ctypes
+                    u = ctypes.windll.user32
+                    u.ReleaseCapture()
+                    u.SendMessageW(u.GetParent(self.root.winfo_id()), 0x00A1, 2, 0)
+                    return
+                except Exception:
+                    pass
             self._drag = (e.x_root - self.root.winfo_x(), e.y_root - self.root.winfo_y())
 
     def _on_drag(self, e):
@@ -607,22 +676,38 @@ class SkinApp(km.App):
 
     # ------------------------------------------------------------------ рамка окна
     def after_show(self):
-        """Окно без системной рамки всё равно получает значок на панели задач Windows."""
+        """Под Windows убираем системную рамку, но окно остаётся обычным: значок на панели задач,
+        Alt+Tab, сворачивание и разворачивание щелчком по значку."""
+        if sys.platform != "win32":
+            return
+        self._frameless()
+        self.root.after(80, lambda: self.root.attributes("-alpha", 1.0))
+        self.root.bind("<Map>", lambda e: e.widget is self.root and self.root.after(40, self._frameless), add="+")
+
+    def _frameless(self):
         if sys.platform != "win32":
             return
         try:
             import ctypes
             u = ctypes.windll.user32
             hwnd = u.GetParent(self.root.winfo_id())
-            style = u.GetWindowLongW(hwnd, -20)
-            u.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
-            self.root.withdraw()
-            self.root.after(20, lambda: (self.root.deiconify(), self.root.focus_force()))
-        except Exception:  # оформление важнее, чем значок на панели
+            if not hwnd:
+                return
+            st = u.GetWindowLongW(hwnd, -16)
+            new = (st & ~(0x00C00000 | 0x00040000 | 0x00010000)) | 0x00080000 | 0x00020000
+            if new != st:
+                u.SetWindowLongW(hwnd, -16, new)
+            ex = u.GetWindowLongW(hwnd, -20)
+            u.SetWindowLongW(hwnd, -20, (ex & ~0x00000080) | 0x00040000)
+            u.SetWindowPos(hwnd, 0, 0, 0, round(W0 * self.k), round(H0 * self.k), 0x0002 | 0x0004 | 0x0010 | 0x0020)
+        except Exception:  # оформление важнее рамки
             pass
 
     def _minimize(self):
         r = self.root
+        if sys.platform == "win32":
+            r.iconify()
+            return
         r.overrideredirect(False)
         r.iconify()
 
