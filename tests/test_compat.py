@@ -182,6 +182,15 @@ def main():
         for e in errors:
             print("  -", e)
         sys.exit(1)
+    import ast as _ast, os as _os, re as _re
+    _root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    _src = open(_os.path.join(_root, "marsskin.py"), encoding="utf-8").read()
+    _used = {_ast.literal_eval('"' + u + '"') for u in _re.findall(r'\b[TU]\("((?:[^"\\]|\\.)*)"', _src)}
+    import marsi18n as _i18n
+    check(not [u for u in _used if u not in _i18n.TR], "переводы окна по макету")
+    check(all(_os.path.isfile(_os.path.join(_root, "assets", n)) for n in ("skin.jpg", "skin_clean.jpg", "skin.json",
+          "icon_frames.jpg", "poster_frames.jpg", "tape.png", "guide_ru.jpg", "guide_uk.jpg", "guide_pl.jpg", "guide_en.jpg")),
+          "файлы оформления и руководства")
     print(f"OK: 32 ключа, {len(phrases)} ключ-фразы, {total} шифровок телефона расшифрованы, "
           f"морзянка совпадает, QR и автоподбор ключа работают.")
 

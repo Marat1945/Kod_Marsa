@@ -299,6 +299,15 @@ TR = {
     "Не удалось сохранить MP3: {e}": ("Не вдалося зберегти MP3: {e}", "Nie udało się zapisać MP3: {e}",
                                       "Could not save the MP3: {e}"),
     "Сначала выберите модель SSTV": ("Спочатку оберіть модель SSTV", "Najpierw wybierz tryb SSTV", "Choose an SSTV mode first"),
+    "Руководство пользователя": ("Посібник користувача", "Instrukcja użytkownika", "User guide"),
+    "шифрование • передача • безопасность": ("шифрування • передача • безпека",
+                                             "szyfrowanie • transmisja • bezpieczeństwo",
+                                             "encryption • transmission • security"),
+    "Назад (Alt+←)": ("Назад (Alt+←)", "Wstecz (Alt+←)", "Back (Alt+←)"),
+    "Вперёд (Alt+→)": ("Вперед (Alt+→)", "Dalej (Alt+→)", "Forward (Alt+→)"),
+    "Щёлкните по строке HEX, чтобы скопировать ключ.": ("Клацніть по рядку HEX, щоб скопіювати ключ.",
+                                                         "Kliknij wiersz HEX, aby skopiować klucz.",
+                                                         "Click the HEX line to copy the key."),
     # ошибки ядра
     "Шифровка неполная или повреждена: проверьте, что скопирован весь текст.":
         ("Шифровка неповна або пошкоджена: перевірте, що скопійовано весь текст.",
@@ -344,7 +353,7 @@ HELP = [
                          "перетащите в окно или откройте кнопкой «Открыть QR». Принятую морзянку вставьте в поле «Азбука Морзе»."),
     ("Ключи", "Те же 32 ключа, что на телефоне. Каждый день сам выбирается ключ с номером текущего числа; если сообщение "
               "зашифровано ключом другого дня, программа найдёт его сама. Ключ-фраза превращается в ключ через SHA-256."),
-    ("Морзе звуком", "Круглый значок звука включает передачу: текущий знак подсвечивается, прозвучавшие сигналы и переданные "
+    ("Морзе звуком", "Лампа и динамик у «Азбуки Морзе» включают передачу: текущий знак подсвечивается, прозвучавшие сигналы и переданные "
                      "буквы шифровки становятся красными и подчёркнутыми. Поставьте курсор между буквами шифровки или "
                      "между сигналами Морзе, и передача начнётся с этого места. Кнопка «Сохранить Morse.mp3» записывает передачу в файл MP3."),
     ("SSTV", "Под QR-кодом выберите модель SSTV и нажмите «Передать SSTV»: картинка QR-кода передаётся звуком для радиоканала, "
@@ -354,7 +363,7 @@ HELP = [
                        "шифровкой группами по 5 знаков. В Word «Выделить всё» берёт только шифровку; номер, дату и другие поля правьте двойным "
                        "щелчком по ним, а к шифровке вернитесь двойным щелчком по ней."),
     ("Файлы и язык", "Всё созданное сохраняется в «Документы\\Код Марса». Язык выбирается кнопкой слева от «Справки». "
-                     "Стрелки ← → возвращают операции этого сеанса; язык и настройки программа помнит всегда."),
+                     "Пункты «Назад» и «Вперёд» в меню ☰ (Alt+← и Alt+→) возвращают операции этого сеанса; язык и настройки программа помнит всегда."),
     ("Совместимость", "Шифровки полностью совместимы с Android-версией «Код Марса» в обе стороны."),
 ]
 HELP_TR = {
@@ -367,7 +376,7 @@ HELP_TR = {
                                "перетягніть у вікно або відкрийте кнопкою «Відкрити QR». Прийняту морзянку вставте в поле «Абетка Морзе»."),
            ("Ключі", "Ті самі 32 ключі, що й на телефоні. Щодня сам обирається ключ із номером поточного числа; якщо повідомлення "
                      "зашифроване ключем іншого дня, програма знайде його сама. Ключ-фраза перетворюється на ключ через SHA-256."),
-           ("Морзе звуком", "Круглий значок звуку вмикає передачу: поточний знак підсвічується, сигнали, що прозвучали, і передані "
+           ("Морзе звуком", "Лампа й динамік біля «Азбуки Морзе» вмикають передачу: поточний знак підсвічується, сигнали, що прозвучали, і передані "
                             "літери шифровки стають червоними й підкресленими. Поставте курсор між літерами шифровки або між "
                             "сигналами Морзе, і передача почнеться з цього місця. Кнопка «Зберегти Morse.mp3» записує передачу у файл MP3."),
            ("SSTV", "Під QR-кодом оберіть модель SSTV і натисніть «Передати SSTV»: картинка QR-коду передається звуком для "
@@ -377,7 +386,7 @@ HELP_TR = {
                               "QR-кодом і шифровкою групами по 5 знаків. У Word «Виділити все» бере лише шифровку; номер, дату та інші поля правте подвійним "
                               "клацанням по них, а до шифровки поверніться подвійним клацанням по ній."),
            ("Файли й мова", "Усе створене зберігається в «Документи\\Код Марса». Мова обирається кнопкою ліворуч від «Довідки». "
-                            "Стрілки ← → повертають операції цього сеансу; мову й налаштування програма пам’ятає завжди."),
+                            "Пункти «Назад» і «Вперед» у меню ☰ (Alt+← і Alt+→) повертають операції цього сеансу; мову й налаштування програма пам’ятає завжди."),
            ("Сумісність", "Шифровки повністю сумісні з Android-версією «Код Марса» в обидва боки.")],
     "pl": [("Jak zaszyfrować", "Wpisz tekst w polu „Wiadomość” i naciśnij Enter lub „Zaszyfruj”. Pojawią się szyfrogram Base32, "
                                "kod Morse’a i kod QR."),
@@ -388,7 +397,7 @@ HELP_TR = {
                                "przeciągnij do okna lub otwórz przyciskiem „Otwórz QR”. Odebrany kod Morse’a wklej w pole „Alfabet Morse’a”."),
            ("Klucze", "Te same 32 klucze co w telefonie. Każdego dnia wybierany jest klucz o numerze bieżącego dnia; jeśli wiadomość "
                       "zaszyfrowano kluczem innego dnia, program sam go znajdzie. Fraza-klucz zamienia się w klucz przez SHA-256."),
-           ("Morse dźwiękiem", "Okrągła ikona dźwięku włącza nadawanie: bieżący znak jest podświetlony, nadane sygnały i litery "
+           ("Morse dźwiękiem", "Lampka i głośnik przy „Alfabecie Morse’a” włączają nadawanie: bieżący znak jest podświetlony, nadane sygnały i litery "
                                "szyfrogramu stają się czerwone i podkreślone. Ustaw kursor między literami szyfrogramu lub między "
                                "sygnałami Morse’a, a nadawanie zacznie się od tego miejsca. Przycisk „Zapisz Morse.mp3” zapisuje nadawanie do pliku MP3."),
            ("SSTV", "Pod kodem QR wybierz tryb SSTV i naciśnij „Nadaj SSTV”: obraz kodu QR jest nadawany dźwiękiem dla kanału "
@@ -398,7 +407,7 @@ HELP_TR = {
                          "szyfrogramem w grupach po 5 znaków. W Wordzie „Zaznacz wszystko” bierze tylko szyfrogram; numer, datę i inne pola "
                          "edytuj dwuklikiem, a do szyfrogramu wróć dwuklikiem na nim."),
            ("Pliki i język", "Wszystko, co tworzy program, trafia do „Dokumenty\\Код Марса”. Język wybiera się przyciskiem po lewej "
-                             "stronie „Pomocy”. Strzałki ← → przywracają operacje tej sesji; język i ustawienia program pamięta zawsze."),
+                             "stronie „Pomocy”. Pozycje „Wstecz” i „Dalej” w menu ☰ (Alt+← i Alt+→) przywracają operacje tej sesji; język i ustawienia program pamięta zawsze."),
            ("Zgodność", "Szyfrogramy są w pełni zgodne z wersją Android „Kod Marsa” w obie strony.")],
     "en": [("How to encrypt", "Type text in the “Message” field and press Enter or “Encrypt”. The Base32 cipher text, Morse code "
                               "and a QR code appear."),
@@ -409,7 +418,7 @@ HELP_TR = {
                               "picture into the window or open it with “Open QR”. Paste received Morse into the “Morse code” field."),
            ("Keys", "The same 32 keys as on the phone. Each day the key with today's day number is selected; if a message was "
                     "encrypted with another day's key, the program finds it. A key phrase becomes a key through SHA-256."),
-           ("Morse by sound", "The round sound icon starts sending: the current sign is highlighted, sent signals and cipher letters "
+           ("Morse by sound", "The lamp and speaker next to “Morse code” start sending: the current sign is highlighted, sent signals and cipher letters "
                               "turn red and underlined. Put the cursor between cipher letters or between Morse signals and sending "
                               "starts from that point. The “Save Morse.mp3” button records the transmission to an MP3 file."),
            ("SSTV", "Under the QR code choose an SSTV mode and press “Send SSTV”: the QR picture is sent as sound for a radio channel, "
@@ -419,7 +428,7 @@ HELP_TR = {
                            "and the cipher text in groups of 5. In Word “Select all” takes only the cipher text; edit the number, date and other "
                            "fields with a double-click, and double-click the cipher text to return."),
            ("Files and language", "Everything the program creates goes to “Documents\\Код Марса”. The language is chosen with the "
-                                  "button left of “Help”. The ← → arrows bring back operations of this session; the language and "
+                                  "button left of “Help”. “Back” and “Forward” in the ☰ menu (Alt+← and Alt+→) bring back operations of this session; the language and "
                                   "settings are always remembered."),
            ("Compatibility", "Cipher texts are fully compatible with the Android version of Mars Code in both directions.")],
 }

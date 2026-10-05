@@ -1,0 +1,721 @@
+# -*- coding: utf-8 -*-
+"""«Код Марса» — окно по макету: металлическая панель радиостанции.
+
+Вся логика (шифрование, Морзе, SSTV, MP3, бланки, история) берётся из kod_marsa.App.
+Здесь только внешний вид: картинка-«шкура» по макету, настоящие поля и кнопки поверх неё,
+лампы и анимации: вращается Марс на значке и на плакате, от вышек расходятся волны,
+девиз печатается на телеграфной ленте, мерцает красная лампа, вспыхивает звезда."""
+import json
+import math
+import random
+import sys
+import time
+import tkinter as tk
+import tkinter.font as tkfont
+
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageStat, ImageTk
+
+import kod_marsa as km
+import marscore as core
+import marsi18n as i18n
+from marsi18n import T
+
+W0, H0, FRAMES = 1672, 941, 48
+INK, CREAM, NOTE_FG = "#2A241D", "#EFE4CE", "#D8CCB4"
+ASSETS = ("skin.jpg", "skin_clean.jpg", "skin.json", "icon_frames.jpg", "poster_frames.jpg", "lamp_red.png",
+          "lamp_orange.png", "lamp_off.png", "tape.png", "guide_ru.jpg", "guide_uk.jpg", "guide_pl.jpg", "guide_en.jpg")
+TEXT = {"msg": (48, 182, 618, 594), "b32": (686, 182, 1296, 446), "status": (690, 450, 1294, 482),
+        "morse": (686, 600, 1296, 894)}
+QR_CARD = (1350, 426, 1648, 668)
+COMBO = (40, 726, 590, 767)
+NOTE = (40, 772, 600, 820)
+TOP_LAMP = (1192, 60)
+STAR = (1495, 124)
+HOT = {
+    "menu": (25, 21, 86, 92), "lang": (1205, 34, 1366, 86), "help": (1374, 34, 1493, 86),
+    "min": (1525, 38, 1560, 78), "max": (1563, 38, 1601, 78), "close": (1604, 38, 1645, 78),
+    "clear_all": (490, 118, 631, 158), "copy1": (1036, 120, 1162, 160), "paste": (1176, 120, 1292, 160),
+    "rb_list": (166, 672, 334, 712), "rb_phrase": (345, 672, 497, 712), "combo": (40, 726, 626, 767),
+    "encrypt": (34, 824, 316, 901), "decrypt": (344, 824, 631, 901), "sound_lamp": (862, 530, 902, 570),
+    "speaker": (902, 528, 944, 574), "morse_save": (944, 528, 1047, 574), "copy_morse": (1065, 528, 1171, 571),
+    "morse_settings": (1186, 528, 1303, 574), "sstv_save": (1338, 687, 1653, 726), "sstv": (1338, 733, 1530, 783),
+    "sstv_mode": (1541, 733, 1653, 783), "save_qr": (1338, 790, 1437, 832), "copy_qr": (1447, 790, 1552, 832),
+    "open_qr": (1561, 790, 1653, 832), "form_png": (1338, 842, 1493, 901), "form_doc": (1498, 842, 1653, 901),
+    "note": NOTE,
+}
+
+
+def TK(prefix):
+    """Перевод длинной строки по её началу."""
+    return T(next((k for k in i18n.TR if k.startswith(prefix)), prefix))
+
+
+def _labels():
+    """Надписи для других языков: (текст, цвет, высота шрифта, шрифт)."""
+    def U(s):
+        return T(s).upper()
+    return {
+        "title": (U("Код Марса"), CREAM, 46, "cond"), "help": (T("Справка"), CREAM, 17, "cond"),
+        "msg_plate": (U("Сообщение"), INK, 24, "cond"), "clear_all": (U("Очистить всё"), CREAM, 15, "cond"),
+        "b32_plate": (U("Шифровка Base32").replace("BASE32", "Base32"), INK, 24, "cond"),
+        "copy1": (U("Копировать"), CREAM, 13, "cond"), "paste": (U("Вставить"), CREAM, 13, "cond"),
+        "morse_plate": (U("Азбука Морзе"), INK, 24, "cond"), "morse_save": (T("Сохранить\nMorse.mp3"), INK, 13, "cond"),
+        "copy_morse": (U("Копировать"), CREAM, 14, "cond"),
+        "morse_settings": (U("Настройка\nазбуки Морзе"), INK, 12, "cond"), "key_plate": (U("Ключ"), INK, 24, "cond"),
+        "rb_list": (T("Выбрать ключ"), CREAM, 16, "cond"), "rb_phrase": (T("Ключ-фраза"), CREAM, 16, "cond"),
+        "encrypt": (U("Зашифровать"), CREAM, 28, "cond"), "decrypt": (U("Расшифровать"), INK, 28, "cond"),
+        "shift_note": (TK("Shift+Enter"), NOTE_FG, 13, "sans"), "sstv_save": (T("Сохранить SSTV.mp3"), INK, 16, "cond"),
+        "save_qr": (T("Сохранить QR"), INK, 14, "cond"), "copy_qr": (T("Копировать QR"), INK, 14, "cond"),
+        "open_qr": (T("Открыть QR"), INK, 14, "cond"), "form_png": (T("Бланк шифровки\npng"), INK, 14, "cond"),
+        "form_doc": (T("Бланк шифровки\ndoc"), INK, 14, "cond"),
+    }
+
+
+class Proxy:
+    """Вместо кнопки: общая логика вызывает .configure(), окно рисует это на панели."""
+
+    def __init__(self, app, name):
+        self.app, self.name = app, name
+
+    def configure(self, **kw):
+        self.app._proxy(self.name, kw)
+
+    config = configure
+
+
+class KeyBox:
+    """Вместо выпадающего списка: хранит номер ключа и рисует его название в поле."""
+
+    def __init__(self, app, idx):
+        self.app, self.idx = app, idx
+
+    def current(self, idx=None):
+        if idx is None:
+            return self.idx
+        self.idx = idx
+        self.app._draw_combo()
+
+    def selection_clear(self):
+        pass
+
+
+class SkinApp(km.App):
+    def __init__(self, root):
+        self._maxed = False
+        self._anim_job = None
+        self._skin_k = None
+        self._guide_win = None
+        super().__init__(root)
+        root.overrideredirect(True)
+        root.bind("<Alt-F4>", lambda e: self._on_close())
+
+    # ------------------------------------------------------------------ размеры, шрифты, картинки
+    def _make_fonts(self):
+        super()._make_fonts()
+        r = self.root
+        sw, sh = r.winfo_screenwidth(), r.winfo_screenheight()
+        self.k = min(sw / W0, sh / H0) if self._maxed else min(1.0, (sw - 24) / W0, (sh - 64) / H0)
+        fams = {f.lower(): f for f in tkfont.families(r)}
+
+        def pick(*names):
+            return next((fams[n.lower()] for n in names if n.lower() in fams), names[-1])
+
+        self.fam = {"cond": pick("Bahnschrift SemiBold Condensed", "Bahnschrift Condensed", "Arial Narrow",
+                                 "DejaVu Sans Condensed", "Liberation Sans Narrow", "Arial"),
+                    "type": pick("Courier New", "Nimbus Mono PS", "FreeMono", "DejaVu Sans Mono"),
+                    "mono": pick("Consolas", "DejaVu Sans Mono", "Courier New"),
+                    "sans": pick("Segoe UI", "DejaVu Sans", "Arial")}
+        self.cond_weight = "normal" if "Bahnschrift" in self.fam["cond"] else "bold"
+
+    def kp(self, v):
+        return max(1, int(round(v * self.k)))
+
+    def font(self, kind, size, weight=None):
+        return (self.fam[kind], -self.kp(size), weight or (self.cond_weight if kind == "cond" else "normal"))
+
+    def _r(self, rect):
+        return tuple(int(round(v * self.k)) for v in rect)
+
+    def _skin_images(self):
+        if self._skin_k == self.k:
+            return
+        k = self.k
+        W, H = round(W0 * k), round(H0 * k)
+
+        def load(name, mode="RGB"):
+            return Image.open(km.resource("assets", name)).convert(mode)
+
+        def rs(im, w, h):
+            return im.resize((max(1, round(w)), max(1, round(h))), Image.LANCZOS)
+
+        with open(km.resource("assets", "skin.json"), encoding="utf-8") as fh:
+            self.meta = json.load(fh)
+        self._skin = {"ru": rs(load("skin.jpg"), W, H), "clean": rs(load("skin_clean.jpg"), W, H)}
+
+        def frames(name, region):
+            strip = load(name)
+            fw, fh = strip.width, strip.height // FRAMES
+            x0, y0, x1, y1 = region
+            return [ImageTk.PhotoImage(rs(strip.crop((0, i * fh, fw, (i + 1) * fh)), (x1 - x0) * k, (y1 - y0) * k))
+                    for i in range(FRAMES)]
+
+        self._icon_frames = frames("icon_frames.jpg", self.meta["icon"]["region"])
+        self._poster_frames = frames("poster_frames.jpg", self.meta["poster"]["region"])
+        self._lamp_src = {n: load(f"lamp_{n}.png", "RGBA") for n in ("red", "orange", "off")}
+        tape = load("tape.png", "RGBA")
+        tx0, _, tx1, _ = self.meta["tape"]
+        self._tape_photo = ImageTk.PhotoImage(rs(tape, (tx1 - tx0) * k, tape.height * k))
+        med = ImageStat.Stat(self._skin["ru"].crop(self._r((200, 300, 450, 500)))).median
+        self.paper = "#%02x%02x%02x" % tuple(med[:3])
+        med = ImageStat.Stat(self._skin["ru"].crop(self._r((250, 738, 450, 756)))).median
+        self.field_bg = "#%02x%02x%02x" % tuple(med[:3])
+        self._lamp_cache, self._halo_cache, self._ov_cache = {}, {}, {}
+        blank = ImageTk.PhotoImage(Image.new("RGBA", (2, 2), (0, 0, 0, 0)))
+        self._snd_frames = [blank] + [self._halo((255, 170, 40), 30, 0.35 + 0.5 * (0.5 + 0.5 * math.sin(2 * math.pi * i / 13)))
+                                      for i in range(13)]
+        self._skin_k = k
+
+    def _halo(self, rgb, radius, alpha):
+        key = (rgb, radius, round(alpha, 2))
+        if key not in self._halo_cache:
+            r = self.kp(radius)
+            s = 2 * r
+            a = Image.new("L", (s, s), 0)
+            ImageDraw.Draw(a).ellipse((r * 0.45, r * 0.45, s - r * 0.45, s - r * 0.45), fill=int(255 * alpha))
+            im = Image.new("RGBA", (s, s), rgb + (0,))
+            im.putalpha(a.filter(ImageFilter.GaussianBlur(r * 0.32)))
+            self._halo_cache[key] = ImageTk.PhotoImage(im)
+        return self._halo_cache[key]
+
+    def _glint(self, level):
+        key = ("glint", level)
+        if key not in self._halo_cache:
+            r = self.kp(34)
+            s, w = 2 * r, max(1, self.kp(2))
+            a = Image.new("L", (s, s), 0)
+            d = ImageDraw.Draw(a)
+            d.ellipse((r * 0.62, r * 0.62, s - r * 0.62, s - r * 0.62), fill=255)
+            d.line((r, r * 0.12, r, s - r * 0.12), fill=210, width=w)
+            d.line((r * 0.12, r, s - r * 0.12, r), fill=210, width=w)
+            a = a.filter(ImageFilter.GaussianBlur(self.kp(3))).point(lambda v: int(v * level))
+            im = Image.new("RGBA", (s, s), (255, 214, 170, 0))
+            im.putalpha(a)
+            self._halo_cache[key] = ImageTk.PhotoImage(im)
+        return self._halo_cache[key]
+
+    def _lamp_img(self, kind, factor=1.0, bright=1.0):
+        key = (kind, factor, bright)
+        if key not in self._lamp_cache:
+            src = self._lamp_src[kind]
+            s = max(4, int(round(src.width * factor * self.k)))
+            im = src.resize((s, s), Image.LANCZOS)
+            if bright != 1.0:
+                rgb = ImageEnhance.Brightness(im.convert("RGB")).enhance(bright)
+                rgb.putalpha(im.getchannel("A"))
+                im = rgb
+            self._lamp_cache[key] = ImageTk.PhotoImage(im)
+        return self._lamp_cache[key]
+
+    # ------------------------------------------------------------------ окно
+    def _build(self):
+        r = self.root
+        self._stop_anim()
+        self._placeholders = {}
+        self._skin_images()
+        k, m = self.k, self.meta
+        W, H = round(W0 * k), round(H0 * k)
+        r.title(T("Код Марса"))
+        r.configure(bg="#14110E")
+        try:
+            if sys.platform == "win32":
+                r.iconbitmap(default=km.resource("assets", "icon.ico"))
+            else:
+                r.iconphoto(True, self._icon_photo)
+        except tk.TclError:
+            pass
+        sw, sh = r.winfo_screenwidth(), r.winfo_screenheight()
+        top = 0 if self._maxed else self.kp(16)
+        r.geometry(f"{W}x{H}+{max(0, (sw - W) // 2)}+{max(0, (sh - H) // 2 - top)}")
+        r.resizable(False, False)
+        cv = self.cv = tk.Canvas(r, width=W, height=H, bd=0, highlightthickness=0, bg="#14110E")
+        cv.place(x=0, y=0)
+        ru = i18n.lang() == "ru"
+        self._bg = self._skin["ru" if ru else "clean"]
+        self._bg_photo = ImageTk.PhotoImage(self._bg)
+        cv.create_image(0, 0, image=self._bg_photo, anchor="nw")
+        self._icon_item = cv.create_image(*self._r(m["icon"]["region"][:2]), image=self._icon_frames[0], anchor="nw")
+        self._poster_item = cv.create_image(*self._r(m["poster"]["region"][:2]), image=self._poster_frames[0],
+                                            anchor="nw")
+        self._glint_item = cv.create_image(*self._r(STAR), tags=("lamp",))
+        tx0, ty0, _, ty1 = self._r(m["tape"])
+        cv.create_image(tx0, ty0, image=self._tape_photo, anchor="nw")
+        self._tape_full = T("шифрование • передача • безопасность").upper()
+        self._tape_text = cv.create_text(tx0 + self.kp(12), (ty0 + ty1) // 2 + 1, anchor="w", text="",
+                                         fill="#2B2219", font=self.font("type", 17, "bold"))
+        if not ru:
+            for name, (text, color, size, kind) in _labels().items():
+                self._label(m["labels"][name], text, color, size, kind, anchor="w" if name == "shift_note" else "center")
+        lx0, ly0, lx1, ly1 = m["dynamic"]["lang"]
+        self._label((lx0, ly0, lx1 + 8, ly1), T("Язык") + " ▾", CREAM, 18, "cond", tag="dyn")
+        # лампы
+        self.lamp_xy = {n: self._r(xy) for n, xy in m["lamps"].items()}
+        self.lamp_xy["top"] = self._r(TOP_LAMP)
+        self._top_halo = cv.create_image(*self.lamp_xy["top"], image=self._halo((255, 60, 30), 26, 0.7), tags=("lamp",))
+        cv.create_image(*self.lamp_xy["top"], image=self._lamp_img("red", 0.55), tags=("lamp",))
+        self._lamp_items = {}
+        self._snd_item = cv.create_image(*self.lamp_xy["morse"], image=self._snd_frames[0], tags=("lamp",))
+        # поля
+        self.msg = self._paper(TEXT["msg"], self.font("type", 17), "word")
+        self.b32 = self._paper(TEXT["b32"], self.font("mono", 16), "char")
+        self.morse = self._paper(TEXT["morse"], self.font("mono", 16, "bold"), "word")
+        x0, y0, x1, y1 = self._r(TEXT["status"])
+        self.status = tk.Label(cv, text="", bg=self.paper, fg="#6B6052", font=self.font("sans", 13), anchor="w")
+        cv.create_window(x0, y0, window=self.status, anchor="nw", width=x1 - x0, height=y1 - y0)
+        x0, y0, x1, y1 = self._r(QR_CARD)
+        self._qr_size = (x1 - x0, y1 - y0)
+        self._card_photo = ImageTk.PhotoImage(self._skin["ru"].crop((x0, y0, x1, y1)))
+        self.qr_cv = tk.Canvas(cv, width=x1 - x0, height=y1 - y0, bd=0, highlightthickness=0, bg=self.paper)
+        cv.create_window(x0, y0, window=self.qr_cv, anchor="nw")
+        self.qr_cv.bind("<Button-3>", self._qr_menu)
+        # ключ
+        x0, y0, x1, y1 = self._r(COMBO)
+        self.mode, self.phrase, self.hex_var = tk.StringVar(value="list"), tk.StringVar(), tk.StringVar()
+        self.phrase_entry = tk.Entry(cv, textvariable=self.phrase, bg=self.field_bg, fg=INK, insertbackground=INK,
+                                     relief="flat", bd=0, highlightthickness=0, font=self.font("type", 17))
+        self._entry_win = cv.create_window(x0 + self.kp(10), y0 + self.kp(5), window=self.phrase_entry, anchor="nw",
+                                           width=x1 - x0 - self.kp(16), height=y1 - y0 - self.kp(10), state="hidden")
+        self.phrase.trace_add("write", lambda *_: self.root.after_idle(self._phrase_changed))
+        self.phrase_entry.bind("<Return>", self.encrypt)
+        self.combo = KeyBox(self, getattr(getattr(self, "combo", None), "idx", self.auto_idx))
+        # кнопки, которые общая логика перерисовывает сама
+        self.sound_btn, self.sstv_btn, self.sstv_mode_btn = Proxy(self, "sound"), Proxy(self, "sstv"), Proxy(self, "sstv_mode")
+        self.open_btn, self.lang_btn, self.menu_btn, self.help_btn = (Proxy(self, n) for n in ("open_qr", "lang", "menu", "help"))
+        self._sstv_text, self._sstv_on, self._mode_text = T("Передать SSTV"), False, T("Модель SSTV")
+        self.cmds = {
+            "menu": self._main_menu, "lang": self._lang_menu, "help": self._help_menu, "min": self._minimize,
+            "max": self._toggle_max, "close": self._on_close, "clear_all": self.clear_all,
+            "copy1": lambda: (self._flash("copy1"), self._copy(self.b32_get(), T("Шифровка скопирована"))),
+            "paste": lambda: (self._flash("paste"), self.paste_cipher()),
+            "rb_list": lambda: self._set_mode("list"), "rb_phrase": lambda: self._set_mode("phrase"),
+            "combo": self._combo_open, "encrypt": lambda: (self._flash("encrypt", 1.1), self.encrypt()),
+            "decrypt": lambda: (self._flash("decrypt", 1.1), self.decrypt_manual()), "sound_lamp": self.toggle_sound,
+            "speaker": self.toggle_sound, "morse_save": self.save_morse_mp3,
+            "copy_morse": lambda: self._copy(self.morse_get(), T("Морзянка скопирована")),
+            "morse_settings": self.show_morse_settings, "sstv_save": self.save_sstv_mp3, "sstv": self._sstv_click,
+            "sstv_mode": self._sstv_menu, "save_qr": self.save_qr, "copy_qr": self.copy_qr, "open_qr": self._open_menu,
+            "form_png": self.form_png, "form_doc": self.form_docx,
+            "note": lambda: self.hex_var.get() and self._copy(self.hex_var.get(), T("HEX-ключ скопирован")),
+        }
+        self.hots = [(n, self._r(HOT[n])) for n in self.cmds]
+        self._hover_name = self._pressed = self._drag = None
+        cv.bind("<Motion>", self._on_motion)
+        cv.bind("<Leave>", lambda e: self._hover(None))
+        cv.bind("<ButtonPress-1>", self._on_press)
+        cv.bind("<B1-Motion>", self._on_drag)
+        cv.bind("<ButtonRelease-1>", self._on_release)
+        cv.bind("<Double-Button-1>", self._on_double)
+        ph = {self.msg: T("Напишите сообщение и нажмите Enter. Расшифрованный текст тоже появляется здесь."),
+              self.b32: TK("Здесь появится шифровка"), self.morse: TK("Морзянка появится"),
+              self.phrase_entry: T("Введите ключ-фразу")}
+        for w, text in ph.items():
+            self._placeholder(w, text)
+            self._placeholders[w][0].configure(font=self.font("type", 15), fg="#8C8172")
+        self._draw_combo()
+        self._sstv_buttons()
+        self._on_mode()
+        self._bind_widgets()
+        self._setup_dnd()
+        self._schedule_qr_redraw()
+        self._start_anim()
+
+    def _paper(self, rect, font, wrap):
+        x0, y0, x1, y1 = self._r(rect)
+        box, t = self._textbox(self.cv, font, wrap)
+        box.configure(bg=self.paper)
+        t.configure(bg=self.paper, fg=INK, insertbackground=INK, highlightthickness=0, padx=self.kp(6),
+                    pady=self.kp(4), selectbackground="#E8B6A6", inactiveselectbackground="#E8B6A6")
+        self.cv.create_window(x0, y0, window=box, anchor="nw", width=x1 - x0, height=y1 - y0)
+        return t
+
+    def _label(self, box, text, color, size, kind, tag="lab", anchor="center"):
+        x0, y0, x1, y1 = self._r(box)
+        lines = text.split("\n")
+        weight = self.cond_weight if kind == "cond" else "normal"
+        while size > 7:
+            f = tkfont.Font(root=self.root, family=self.fam[kind], size=-self.kp(size), weight=weight)
+            if max(f.measure(s) for s in lines) <= x1 - x0 - self.kp(2) and f.metrics("linespace") * len(lines) <= y1 - y0 + self.kp(6):
+                break
+            size -= 1
+        x = x0 if anchor == "w" else (x0 + x1) // 2
+        return self.cv.create_text(x, (y0 + y1) // 2, text=text, fill=color, font=self.font(kind, size),
+                                   justify="left" if anchor == "w" else "center", anchor=anchor, tags=(tag,))
+
+    # ------------------------------------------------------------------ рисуемые части
+    def _draw_combo(self):
+        cv = getattr(self, "cv", None)
+        if cv is None or not hasattr(self, "mode"):
+            return
+        cv.delete("combo")
+        x0, y0, x1, y1 = self._r(COMBO)
+        cv.create_text(x0 + self.kp(14), (y0 + y1) // 2, text=self._key_name(self.combo.current()), anchor="w",
+                       fill=INK, font=self.font("type", 18), tags=("combo",),
+                       state="hidden" if self.mode.get() == "phrase" else "normal")
+
+    def _draw_note(self):
+        cv = self.cv
+        cv.delete("note")
+        x0, y0, x1, _ = self._r(NOTE)
+        if self.mode.get() == "phrase":
+            text = T("HEX-ключ:") + " " + self.hex_var.get() + "\n" + T("Щёлкните по строке HEX, чтобы скопировать ключ.")
+            font = self.font("mono", 12)
+        else:
+            text, font = TK("Автокод"), self.font("sans", 13)
+        cv.create_text(x0, y0, text=text, anchor="nw", width=x1 - x0, fill=NOTE_FG, font=font, tags=("note",))
+
+    def _draw_sstv(self):
+        cv = getattr(self, "cv", None)
+        if cv is None:
+            return
+        cv.delete("sstvtxt")
+        d = self.meta["dynamic"]
+        on = self._sstv_on or self._sstv_active
+        self._label(d["sstv"], self._sstv_text.upper(), CREAM if on else "#C7A39A", 21, "cond", tag="sstvtxt")
+        self._label(d["sstv_mode"], self._mode_text, INK, 17, "cond", tag="sstvtxt")
+
+    def _proxy(self, name, kw):
+        if name == "sound" and "image" in kw:
+            self.cv.itemconfigure(self._snd_item, image=kw["image"])
+        elif name == "sstv":
+            self._sstv_text = kw.get("text", self._sstv_text)
+            if "state" in kw:
+                self._sstv_on = kw["state"] != "disabled"
+            self._draw_sstv()
+        elif name == "sstv_mode" and "text" in kw:
+            self._mode_text = kw["text"].replace("▾", "").strip()
+            self._draw_sstv()
+
+    def _set_lamp(self, name, kind, factor=1.0):
+        if name in self._lamp_items:
+            self.cv.delete(self._lamp_items.pop(name))
+        if kind:
+            self._lamp_items[name] = self.cv.create_image(*self.lamp_xy[name], image=self._lamp_img(kind, factor),
+                                                          tags=("lamp",))
+
+    def _flash(self, name, factor=0.78, ms=1200):
+        """Лампа загорается после нажатия."""
+        cv, xy = self.cv, self.lamp_xy[name]
+        bright = 1.0 if name in ("copy1", "paste") else 1.3
+        items = [cv.create_image(*xy, image=self._halo((255, 80, 30), 30, 0.75), tags=("lamp",)),
+                 cv.create_image(*xy, image=self._lamp_img("red", factor, bright), tags=("lamp",))]
+        self.root.after(ms if name in ("copy1", "paste") else 500, lambda: [cv.delete(i) for i in items])
+
+    def _phrase_changed(self):
+        """После того как поле получило новый текст: HEX-ключ, подсказка, строка под полем."""
+        try:
+            self._update_hex()
+            self._draw_note()
+        except tk.TclError:
+            pass
+
+    def _set_mode(self, mode):
+        self.mode.set(mode)
+        self._on_mode()
+
+    def _on_mode(self):
+        phrase = self.mode.get() == "phrase"
+        if not phrase:
+            self.phrase.set("")
+        self.cv.itemconfigure(self._entry_win, state="normal" if phrase else "hidden")
+        self.cv.itemconfigure("combo", state="hidden" if phrase else "normal")
+        self._set_lamp("rb_list", "off" if phrase else None, 1.15)
+        self._set_lamp("rb_phrase", "red" if phrase else None)
+        self._draw_note()
+        if phrase:
+            self.phrase_entry.focus_set()
+
+    def _update_nav(self):
+        pass  # стрелки истории — в меню ☰ и на Alt+← / Alt+→
+
+    def _sstv_click(self):
+        if not self.sstv_mode:
+            self.toast(T("Сначала выберите модель SSTV"), error=True)
+            return
+        self._flash("sstv", 1.0)
+        self.toggle_sstv()
+
+    def _redraw_qr(self):
+        self._redraw_job = None
+        cv = self.qr_cv
+        try:
+            w, h = self._qr_size
+            cv.delete("all")
+        except tk.TclError:
+            return
+        self._qr_box = None
+        cv.create_image(0, 0, image=self._card_photo, anchor="nw")
+        if self.qr_mat is not None:
+            n, cap = len(self.qr_mat), self.kp(30)
+            mod = max(1, min(w - self.kp(60), h - cap - self.kp(36)) // n)
+            size = n * mod
+            self._qr_photo = ImageTk.PhotoImage(core.qr_image(self.qr_mat, mod))
+            qx, qy = (w - size) // 2, max(self.kp(12), (h - cap - size) // 2)
+            cv.create_image(qx, qy, image=self._qr_photo, anchor="nw")
+            self._qr_box = (qx, qy, qx + size, qy + size)
+            cv.create_text(w // 2, qy + size + cap // 2 + self.kp(2), text=T("Ключ: {key}", key=self._key_label(self.cipher_kid)),
+                           width=w - self.kp(30), font=self.font("type", 15), fill=INK)
+        else:
+            text = self._err(self.qr_err) if self.qr_err else T(
+                "Здесь появится QR-код.\nЧтобы расшифровать картинку с QR, перетащите её в окно или нажмите «Открыть QR».")
+            cv.create_text(w // 2, h // 2, text=text, width=w - self.kp(52), justify="center", font=self.font("sans", 13),
+                           fill="#B00000" if self.qr_err else "#6E6253")
+        self._sstv_overlay()
+
+    # ------------------------------------------------------------------ меню
+    def _popup_under(self, menu, widget):
+        if isinstance(widget, Proxy):
+            x0, _, _, y1 = self._r(HOT[widget.name])
+            menu.tk_popup(self.cv.winfo_rootx() + x0, self.cv.winfo_rooty() + y1)
+        else:
+            super()._popup_under(menu, widget)
+
+    def _help_menu(self):
+        m = self._menu()
+        m.add_command(label=T("Справка"), command=self.show_help)
+        m.add_command(label=T("Руководство пользователя"), command=self.show_guide)
+        self._popup_under(m, self.help_btn)
+
+    def _main_menu(self):
+        m = self._menu()
+        m.add_command(label=T("Назад (Alt+←)"), command=self.history_back,
+                      state="normal" if self.hpos > 0 else "disabled")
+        m.add_command(label=T("Вперёд (Alt+→)"), command=self.history_forward,
+                      state="normal" if self.hpos < len(self.history) - 1 else "disabled")
+        m.add_separator()
+        m.add_command(label=T("Поделиться: показывать в меню"), state="disabled")
+        self._menu_vars = []
+        for key, name in km.SHARE_APPS:
+            var = tk.BooleanVar(value=self.prefs["share"].get(key, True))
+            self._menu_vars.append(var)
+            m.add_checkbutton(label=name, variable=var, command=lambda k=key, v=var: self._toggle_share(k, v.get()))
+        m.add_separator()
+        m.add_command(label=T("Открыть папку «Код Марса»"), command=lambda: km.open_folder(km.output_dir()))
+        m.add_command(label=T("Справка"), command=self.show_help)
+        m.add_command(label=T("Руководство пользователя"), command=self.show_guide)
+        self._popup_under(m, self.menu_btn)
+
+    def _combo_open(self):
+        if self.mode.get() == "phrase":
+            return
+        x0, y0, x1, y1 = self._r(HOT["combo"])
+        top = tk.Toplevel(self.root)
+        top.overrideredirect(True)
+        top.configure(bg="#3A3128")
+        n = len(core.BUILTIN_KEYS)
+        lb = tk.Listbox(top, bg=self.paper, fg=INK, font=self.font("type", 17), selectbackground="#B3160C",
+                        selectforeground="#FFFFFF", activestyle="none", bd=0, highlightthickness=0, height=min(12, n))
+        for i in range(n):
+            lb.insert("end", "  " + self._key_name(i))
+        sb = tk.Scrollbar(top, command=lb.yview)
+        lb.configure(yscrollcommand=sb.set)
+        lb.pack(side="left", fill="both", expand=True, padx=(2, 0), pady=2)
+        sb.pack(side="right", fill="y", pady=2)
+        cur = self.combo.current()
+        lb.selection_set(cur)
+        lb.see(cur)
+        top.update_idletasks()
+        top.geometry(f"{x1 - x0}x{lb.winfo_reqheight() + 4}+{self.cv.winfo_rootx() + x0}+{self.cv.winfo_rooty() + y1}")
+
+        def close(_e=None):
+            try:
+                top.grab_release()
+                top.destroy()
+            except tk.TclError:
+                pass
+
+        def pick(_e=None):
+            sel = lb.curselection()
+            if sel:
+                self.combo.current(sel[0])
+            close()
+
+        def outside(e):
+            if not (0 <= e.x_root - top.winfo_rootx() < top.winfo_width()
+                    and 0 <= e.y_root - top.winfo_rooty() < top.winfo_height()):
+                close()
+
+        lb.bind("<ButtonRelease-1>", pick)
+        lb.bind("<Return>", pick)
+        top.bind("<Escape>", close)
+        top.bind("<Button-1>", outside)
+        top.after(10, lambda: (top.grab_set(), lb.focus_set()))
+
+    # ------------------------------------------------------------------ мышь
+    def _hit(self, x, y):
+        for name, (x0, y0, x1, y1) in self.hots:
+            if x0 <= x < x1 and y0 <= y < y1:
+                if name == "note" and self.mode.get() != "phrase":
+                    continue
+                return name
+        return None
+
+    def _overlay(self, name, factor):
+        cv = self.cv
+        cv.delete("ov")
+        if name in (None, "note"):
+            return
+        rect = dict(self.hots)[name]
+        key = (name, factor)
+        if key not in self._ov_cache:
+            self._ov_cache[key] = ImageTk.PhotoImage(ImageEnhance.Brightness(self._bg.crop(rect)).enhance(factor))
+        cv.create_image(rect[0], rect[1], image=self._ov_cache[key], anchor="nw", tags=("ov",))
+        for tag in ("lab", "dyn", "combo", "note", "sstvtxt", "lamp"):
+            cv.tag_raise(tag)
+
+    def _hover(self, name):
+        if name != self._hover_name:
+            self._hover_name = name
+            self._overlay(name, 1.13)
+            self.cv.configure(cursor="hand2" if name else "")
+
+    def _on_motion(self, e):
+        if not self._pressed:
+            self._hover(self._hit(e.x, e.y))
+
+    def _on_press(self, e):
+        self._pressed = self._hit(e.x, e.y)
+        if self._pressed:
+            self._overlay(self._pressed, 0.82)
+        elif e.y < self.kp(100) and not self._maxed:
+            self._drag = (e.x_root - self.root.winfo_x(), e.y_root - self.root.winfo_y())
+
+    def _on_drag(self, e):
+        if self._drag:
+            self.root.geometry(f"+{e.x_root - self._drag[0]}+{e.y_root - self._drag[1]}")
+
+    def _on_release(self, e):
+        name, self._pressed, self._drag = self._pressed, None, None
+        self._hover_name = None
+        self._overlay(None, 1)
+        if name and self._hit(e.x, e.y) == name:
+            self.cmds[name]()
+        if getattr(self, "cv", None) is not None and self.cv.winfo_exists():
+            self._hover(self._hit(e.x, e.y))
+
+    def _on_double(self, e):
+        if e.y < self.kp(100) and not self._hit(e.x, e.y):
+            self._toggle_max()
+
+    # ------------------------------------------------------------------ рамка окна
+    def after_show(self):
+        """Окно без системной рамки всё равно получает значок на панели задач Windows."""
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            u = ctypes.windll.user32
+            hwnd = u.GetParent(self.root.winfo_id())
+            style = u.GetWindowLongW(hwnd, -20)
+            u.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            self.root.withdraw()
+            self.root.after(20, lambda: (self.root.deiconify(), self.root.focus_force()))
+        except Exception:  # оформление важнее, чем значок на панели
+            pass
+
+    def _minimize(self):
+        r = self.root
+        r.overrideredirect(False)
+        r.iconify()
+
+        def back(_e=None):
+            if r.state() == "normal":
+                r.unbind("<Map>")
+                r.overrideredirect(True)
+                self.after_show()
+
+        r.bind("<Map>", back)
+
+    def _toggle_max(self):
+        self._maxed = not self._maxed
+        st = (self.msg_get(), self.b32_get(), self.morse_get(), self.mode.get(), self.phrase.get(),
+              self.combo.current(), self._morse_src)
+        self.stop_sound()
+        self.stop_sstv()
+        self._make_fonts()
+        for w in self.root.winfo_children():
+            w.destroy()
+        self._help_win = self._settings_win = self._toast_win = self._guide_win = None
+        self._drag_on = False
+        self._build()
+        msg, b32, mrs, mode, phrase, idx, src = st
+        self.mode.set(mode)
+        self._on_mode()
+        self.phrase.set(phrase)
+        self.combo.current(idx)
+        self._set(self.msg, msg)
+        self._set_b32(b32)
+        self._set_morse(mrs, src=src)
+        self._update_drag_source()
+        self._schedule_qr_redraw()
+
+    # ------------------------------------------------------------------ анимации
+    def _start_anim(self):
+        self._tick = self._frame = 0
+        self._tape = {"phase": "type", "n": 0, "wait": 10}
+        self._glint_i, self._next_glint = None, time.time() + random.uniform(4, 8)
+        self._anim()
+
+    def _stop_anim(self):
+        if self._anim_job:
+            try:
+                self.root.after_cancel(self._anim_job)
+            except tk.TclError:
+                pass
+        self._anim_job = None
+
+    def _anim(self):
+        self._anim_job = None
+        cv = getattr(self, "cv", None)
+        if cv is None or not cv.winfo_exists():
+            return
+        self._tick += 1
+        if self._tick % 3 == 0:  # Марс поворачивается, волны идут от вышек, лампа мерцает
+            self._frame = (self._frame + 1) % FRAMES
+            cv.itemconfigure(self._icon_item, image=self._icon_frames[self._frame])
+            cv.itemconfigure(self._poster_item, image=self._poster_frames[self._frame])
+            cv.itemconfigure(self._top_halo, image=self._halo((255, 60, 30), 26, random.choice((0.55, 0.64, 0.72, 0.8, 0.88))))
+        self._tape_step()
+        now = time.time()
+        if self._glint_i is None and now >= self._next_glint:
+            self._glint_i = 0
+        if self._glint_i is not None:  # звезда вспыхивает раз в 10–15 секунд
+            n = 40
+            lvl = math.sin(math.pi * self._glint_i / n)
+            cv.itemconfigure(self._glint_item, image=self._glint(round(max(0.1, lvl), 1)) if lvl > 0.05 else "")
+            self._glint_i += 1
+            if self._glint_i > n:
+                self._glint_i, self._next_glint = None, now + random.uniform(10, 15)
+                cv.itemconfigure(self._glint_item, image="")
+        self._anim_job = self.root.after(40, self._anim)
+
+    def _tape_step(self):
+        """Девиз печатается на ленте по букве, потом стирается и печатается снова."""
+        s, full = self._tape, self._tape_full
+        if s["wait"] > 0:
+            s["wait"] -= 1
+            return
+        if s["phase"] == "type":
+            s["n"] += 1
+            self.cv.itemconfigure(self._tape_text, text=full[:s["n"]])
+            s["wait"] = 0 if full[s["n"] - 1:s["n"]] == " " else 1
+            if s["n"] >= len(full):
+                s["phase"], s["wait"] = "erase", 62
+        else:
+            s["n"] -= 1
+            gone = len(full) - s["n"]
+            self.cv.itemconfigure(self._tape_text, text=" " * gone + full[gone:])
+            if s["n"] <= 0:
+                s["phase"], s["wait"], s["n"] = "type", 18, 0
+
+    def _on_close(self):
+        self._stop_anim()
+        super()._on_close()

@@ -29,6 +29,10 @@ from tkinter import filedialog, ttk
 from tkinter import font as tkfont
 
 from PIL import Image, ImageDraw, ImageFilter, ImageTk
+try:  # нужен картинкам в окне собранной программы (ImageTk)
+    import PIL._tkinter_finder  # noqa: F401
+except ImportError:
+    pass
 
 import marscore as core
 import marsform as forms
@@ -772,6 +776,7 @@ class App:
         m.add_separator()
         m.add_command(label=T("Открыть папку «Код Марса»"), command=lambda: open_folder(output_dir()))
         m.add_command(label=T("Справка"), command=self.show_help)
+        m.add_command(label=T("Руководство пользователя"), command=self.show_guide)
         self._popup_under(m, self.menu_btn)
 
     def _toggle_share(self, key, on):
@@ -2108,6 +2113,39 @@ class App:
                 pass
             self._toast_win = None
 
+    def show_guide(self, lang=None):
+        """Руководство пользователя: картинка-инструкция, язык выбирается кнопками сверху."""
+        lang = lang or i18n.lang()
+        win = getattr(self, "_guide_win", None)
+        if win is None or not win.winfo_exists():
+            win = self._guide_win = tk.Toplevel(self.root)
+            win.configure(bg="#1A1714")
+            try:
+                win.iconphoto(False, self._icon_photo)
+            except tk.TclError:
+                pass
+            bar = tk.Frame(win, bg="#1A1714")
+            bar.pack(fill="x")
+            self._guide_btns = {}
+            for code, name, _ in i18n.LANGS:
+                b = tk.Label(bar, text=name, font=self.f_btn_small, bg="#1A1714", fg="#EFE4CE", cursor="hand2",
+                             padx=self.px(14), pady=self.px(6))
+                b.pack(side="left")
+                b.bind("<Button-1>", lambda e, c=code: self.show_guide(c))
+                self._guide_btns[code] = b
+            self._guide_lbl = tk.Label(win, bg="#1A1714", bd=0)
+            self._guide_lbl.pack()
+        win.title(T("Руководство пользователя"))
+        img = Image.open(resource("assets", f"guide_{lang}.jpg"))
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        k = min(1.0, (sw - 60) / img.width, (sh - 150) / img.height)
+        self._guide_photo = ImageTk.PhotoImage(img.resize((int(img.width * k), int(img.height * k)), Image.LANCZOS))
+        self._guide_lbl.configure(image=self._guide_photo)
+        for code, b in self._guide_btns.items():
+            b.configure(bg="#B3160C" if code == lang else "#1A1714")
+        win.lift()
+        win.focus_force()
+
     def show_help(self):
         if self._help_win is not None and self._help_win.winfo_exists():
             self._help_win.lift()
@@ -2198,6 +2236,20 @@ def run_selftest():
         mp3 = morse.pcm_to_mp3(b"\x00\x00" * 22050, 22050, 64)
         assert mp3[:1] == b"\xff" or mp3[:3] == b"ID3"
         lines.append("MP3: кодировщик LAME работает")
+        import marsskin
+        for name in marsskin.ASSETS:
+            assert os.path.isfile(resource("assets", name)), name
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            app = marsskin.SkinApp(root)
+            app._set(app.msg, "Проверка окна")
+            app.encrypt()
+            assert app.b32_get(), "окно не шифрует"
+            root.destroy()
+            lines.append("окно по макету: собирается и шифрует")
+        except tk.TclError as e:
+            lines.append(f"окно по макету: нет экрана ({e})")
         for code, _, _ in i18n.LANGS:
             i18n.set_lang(code)
             assert T("Зашифровать") and i18n.help_sections()
@@ -2251,12 +2303,25 @@ def main():
     if root is None:
         root = tk.Tk()
     root.withdraw()
-    app = App(root)
+    app = None
+    try:  # окно по макету; если файлов оформления нет — прежний вид
+        import marsskin
+        if all(os.path.isfile(resource("assets", n)) for n in marsskin.ASSETS):
+            app = marsskin.SkinApp(root)
+    except Exception:
+        for w in root.winfo_children():
+            w.destroy()
+        root.overrideredirect(False)
+        app = None
+    if app is None:
+        app = App(root)
 
     def start():
         root.deiconify()
         root.lift()
         root.focus_force()
+        if hasattr(app, "after_show"):
+            app.after_show()
         app.msg.focus_set()
         args = [a for a in sys.argv[1:] if not a.startswith("--")]
         if args and os.path.isfile(args[0]):  # файл, перетащенный на значок программы
