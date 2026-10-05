@@ -210,9 +210,9 @@ def _is_word_gap(sep):
 
 
 def timeline(morse, cfg):
-    """[(начало_мс, длительность_мс, номер_знака_в_тексте), ...] и общая длительность."""
+    """[(начало_мс, длительность_мс, номер_знака_в_тексте, номер_буквы), ...] и общая длительность."""
     unit, letter_gap, word_gap = gaps(cfg)
-    events, t, sep, last_end = [], float(LEAD_MS), None, None
+    events, t, sep, last_end, letter = [], float(LEAD_MS), None, None, 0
     for idx, ch in enumerate(normalize(morse)):
         if ch in ".-":
             if last_end is not None:
@@ -220,12 +220,23 @@ def timeline(morse, cfg):
                     t = last_end + unit
                 else:
                     t = last_end + (word_gap if _is_word_gap(sep) else letter_gap)
+                    letter += 1
             dur = unit if ch == "." else 3 * unit
-            events.append((t, dur, idx))
+            events.append((t, dur, idx, letter))
             last_end, sep = t + dur, None
         else:
             sep = (sep or "") + ch
     return events, (last_end or LEAD_MS) + TAIL_MS
+
+
+def shift(events, start):
+    """События начиная с номера start; время сдвинуто к началу записи."""
+    if not events:
+        return [], LEAD_MS + TAIL_MS
+    start = max(0, min(start, len(events) - 1))
+    base = events[start][0] - LEAD_MS
+    out = [(t - base, d, i, l) for t, d, i, l in events[start:]]
+    return out, out[-1][0] + out[-1][1] + TAIL_MS
 
 
 def _segment(kind, n, tone, vol, noise, variant):
@@ -268,7 +279,7 @@ def render_wav(events, total_ms, cfg, target):
             cache[key] = _segment(kind, n, tone, vol, noise, key[2])
         return cache[key]
 
-    for start, dur, _ in events:
+    for start, dur, *_ in events:
         s0 = int(round(start * SAMPLE_RATE / 1000.0))
         n = int(round(dur * SAMPLE_RATE / 1000.0))
         if s0 > cursor:

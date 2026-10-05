@@ -128,11 +128,48 @@ def main():
     check(len(images) == len(pages), "листы PNG")
     docx = io.BytesIO()
     forms.build_docx(form, long_cipher, "ванька", "041026/001", docx)
+    names = zipfile.ZipFile(docx).namelist()
     xml = zipfile.ZipFile(docx).read("word/document.xml").decode("utf-8")
-    texts = ["".join(re.findall(r'<w:t xml:space="preserve">(.*?)</w:t>', p))
-             for p in re.findall(r"<w:p>(.*?)</w:p>", xml) if 'w:line="480"' in p]
-    check(texts == ["".join(p) for p in pages], "Word: шифровка копируется без пробелов")
+    body = re.sub(r"<w:txbxContent>.*?</w:txbxContent>", "", xml, flags=re.S)
+    check("".join(re.findall(r'<w:t xml:space="preserve">(.*?)</w:t>', body)) == "".join(groups),
+          "Word: «Выделить всё» берёт только шифровку, без пробелов")
     check("Ключ: ванька" in xml and "041026/001" in xml, "Word: номер и ключ на бланке")
+    check(not any("header" in n for n in names), "Word: без колонтитулов")
+
+    # языки: все фразы окна переведены на украинский, польский и английский
+    import ast
+    import marsi18n as i18n
+    src = open(os.path.join(os.path.dirname(HERE), "kod_marsa.py"), encoding="utf-8").read()
+    used = {n.args[0].value for n in ast.walk(ast.parse(src))
+            if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "T" and n.args
+            and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str)}
+    used |= set(morse.LANG_NAMES.values()) | {lbl for _, lbl, _, _ in morse.SEPARATORS}
+    used |= {name for _, name in morse.ALPHABET_CHOICES} | set(i18n.ERRORS.values())
+    missing = sorted(k for k in used if k not in i18n.TR)
+    check(not missing, f"нет перевода: {missing[:3]}")
+
+    def fields(text):
+        return set(re.findall(r"{(\w+)}", text))
+
+    check(all(len(v) == 3 and all(v) and all(fields(x) == fields(k.replace("_form", "")) for x in v)
+              for k, v in i18n.TR.items()), "переводы: все языки и подстановки на месте")
+    check(all(len(i18n.HELP_TR[c]) == len(i18n.HELP) for c in ("uk", "pl", "en")), "справка на всех языках")
+
+    # SSTV: длительность и код VIS в заголовке передачи
+    import marssstv as sstv
+    for name in ("Robot 36", "Martin 1", "PD 120"):
+        img, _ = sstv.qr_frame(core.qr_matrix(vectors[0][2]), name)
+        samples = sstv.synthesize(img, name)
+        check(abs(len(samples) / sstv.SAMPLE_RATE * 1000 - sstv.duration_ms(name)) < 5, f"SSTV {name}: длительность")
+        bits = []
+        for b in range(8):  # 7 бит кода и бит чётности, по 30 мс после 640 мс заголовка
+            a = int((640 + 30 * b + 5) * sstv.SAMPLE_RATE / 1000)
+            z = int((640 + 30 * b + 25) * sstv.SAMPLE_RATE / 1000)
+            seg = samples[a:z]
+            crossings = sum(1 for i in range(1, len(seg)) if (seg[i - 1] < 0) != (seg[i] < 0))
+            bits.append(1 if crossings / 2 / ((z - a) / sstv.SAMPLE_RATE) < 1200 else 0)
+        code = sum(bit << i for i, bit in enumerate(bits[:7]))
+        check(code == sstv.MODES[name]["vis"] and bits[7] == sum(bits[:7]) % 2, f"SSTV {name}: код VIS")
 
     total = len(vectors)
     if errors:

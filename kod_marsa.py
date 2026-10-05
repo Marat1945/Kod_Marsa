@@ -11,15 +11,19 @@ from __future__ import annotations
 
 import datetime as dt
 import io
+import json
 import math
 import os
 import random
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import tkinter as tk
 import traceback
+import urllib.parse
+import webbrowser
 import zipfile
 from tkinter import filedialog, ttk
 from tkinter import font as tkfont
@@ -28,7 +32,10 @@ from PIL import Image, ImageDraw, ImageFilter, ImageTk
 
 import marscore as core
 import marsform as forms
+import marsi18n as i18n
 import marsmorse as morse
+import marssstv as sstv
+from marsi18n import T
 
 try:
     from tkinterdnd2 import COPY, DND_FILES, DND_TEXT, TkinterDnD
@@ -38,72 +45,13 @@ except Exception:  # без перетаскивания программа то
 
 IS_WIN = sys.platform == "win32"
 OUT_FOLDER = "Код Марса"
+SHARE_APPS = [("telegram", "Telegram"), ("viber", "Viber"), ("instagram", "Instagram"), ("deltachat", "Delta Chat")]
 
-# Цвета из оформления Android-версии: космос логотипа, красный Марс иконки,
-# светлый фон главного экрана.
 C = {
-    "space": "#0C0F16",
-    "space_text": "#F3EDE2",
-    "space_dim": "#4C5262",
-    "space_hover": "#252A38",
-    "paper": "#F4EFE5",
-    "card": "#FFFEFA",
-    "line": "#DED5C4",
-    "ink": "#1F1B16",
-    "muted": "#766C60",
-    "faint": "#A39888",
-    "mars": "#C20000",
-    "mars_hover": "#990000",
-    "mars_soft": "#F5D8D3",
-    "hover": "#EEE6D8",
+    "space": "#0C0F16", "space_text": "#F3EDE2", "space_dim": "#4C5262", "space_hover": "#252A38",
+    "paper": "#F4EFE5", "card": "#FFFEFA", "line": "#DED5C4", "ink": "#1F1B16", "muted": "#766C60",
+    "faint": "#A39888", "mars": "#C20000", "mars_hover": "#990000", "mars_soft": "#F5D8D3", "hover": "#EEE6D8",
 }
-
-HELP = [
-    ("Как зашифровать",
-     "Напишите текст в поле «Сообщение» и нажмите Enter или кнопку «Зашифровать». Появятся шифровка "
-     "Base32, азбука Морзе и QR-код. Shift+Enter переносит строку."),
-    ("Как отправить",
-     "Скопируйте шифровку и отправьте её текстом. Или нажмите «Копировать QR» и вставьте картинку "
-     "в мессенджер сочетанием Ctrl+V. QR-код можно перетащить мышью из окна прямо в чат или папку."),
-    ("Как расшифровать",
-     "Вставьте шифровку в поле «Шифровка Base32»: программа расшифрует её сама. Картинку с QR-кодом "
-     "можно перетащить в окно или открыть кнопкой «Открыть QR»: из файла, из буфера обмена или прямо "
-     "с экрана. Принятую морзянку вставьте в поле «Азбука Морзе»: шифровка распознается сама."),
-    ("Звук Морзе",
-     "Круглый значок рядом с надписью «Азбука Морзе» включает передачу звуком; уже прозвучавшие "
-     "сигналы становятся красными. Повторный щелчок останавливает звук, следующий начинает передачу "
-     "сначала. В «Настройке азбуки Морзе»: скорость, паузы по Фарнсворту, тон, громкость, помехи, "
-     "разделители, выбор азбуки и сохранение звука в файл WAV."),
-    ("Язык передачи",
-     "Напишите в поле Морзе обычный текст и нажмите Enter или значок звука: текст переведётся "
-     "в морзянку, азбука (латиница, русская или украинская) выбирается сама. Принятая обычная "
-     "морзянка по Enter переводится в текст, язык тоже определяется сам. Короткие фразы на русском "
-     "и украинском по сигналам неотличимы; тогда выберите азбуку в настройках."),
-    ("Ключи",
-     "В списке те же 32 ключа, что и в Android-версии: «Универсальный» и «Код 1» – «Код 31». "
-     "Каждый день сам выбирается ключ с номером текущего числа. Если сообщение зашифровано ключом "
-     "другого дня, программа найдёт нужный ключ и скажет, какой подошёл. Ключ-фраза превращается "
-     "в ключ через SHA-256 так же, как на телефоне: у отправителя и получателя должна быть одна фраза."),
-    ("Бланк шифровки",
-     "Кнопки «Бланк шифровки png» и «Бланк шифровки doc» сохраняют бланк с QR-кодом, ключом и шифровкой "
-     "группами по 5 знаков. Номер бланка состоит из даты отправки и порядкового номера, например "
-     "041026/001. Длинная шифровка занимает несколько листов с номером в правом нижнем углу. В Word "
-     "номер, дату, ключ, шифровку и пустые поля бланка можно править; шифровка копируется без пробелов."),
-    ("Где файлы",
-     "QR-коды, бланки и звук сохраняются в папку «Документы\\Код Марса». Щелчок по уведомлению "
-     "о сохранении открывает эту папку."),
-    ("Назад и вперёд",
-     "Стрелки справа от «Справки» (или Alt+← и Alt+→) возвращают к предыдущей операции и обратно. "
-     "Программа помнит операции только до закрытия: после нового запуска история и номера бланков "
-     "начинаются заново."),
-    ("Совместимость",
-     "Шифровки полностью совместимы с Android-версией «Код Марса»: сообщение с телефона "
-     "расшифровывается на компьютере, а сообщение с компьютера — на телефоне."),
-    ("Клавиши",
-     "Enter в поле сообщения — зашифровать. Enter в поле шифровки — расшифровать. Enter в поле Морзе — "
-     "перевести. Удержание Backspace 2 секунды очищает все поля. Правая кнопка мыши открывает меню. "
-     "F1 — эта справка."),
-]
 
 
 def resource(*parts):
@@ -190,12 +138,67 @@ def open_folder(path):
         pass
 
 
-def plural(n, one, few, many):
-    if n % 10 == 1 and n % 100 != 11:
-        return one
-    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
-        return few
-    return many
+# ---------------------------------------------------------------------- настройки (язык и т. п.)
+def prefs_path():
+    base = os.environ.get("APPDATA") if IS_WIN else os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base or os.path.expanduser("~"), "KodMarsa", "settings.json")
+
+
+def load_prefs():
+    prefs = {"lang": "ru", "share": {k: True for k, _ in SHARE_APPS}, "morse": dict(morse.DEFAULTS), "sstv": ""}
+    try:
+        with open(prefs_path(), encoding="utf-8") as fh:
+            saved = json.load(fh)
+        prefs["lang"] = saved.get("lang", "ru")
+        prefs["share"].update({k: bool(v) for k, v in saved.get("share", {}).items() if k in prefs["share"]})
+        prefs["morse"].update({k: v for k, v in saved.get("morse", {}).items() if k in morse.DEFAULTS})
+        prefs["sstv"] = saved.get("sstv", "") if saved.get("sstv", "") in sstv.MODES else ""
+    except Exception:
+        pass
+    return prefs
+
+
+def save_prefs(prefs):
+    try:
+        os.makedirs(os.path.dirname(prefs_path()), exist_ok=True)
+        with open(prefs_path(), "w", encoding="utf-8") as fh:
+            json.dump(prefs, fh, ensure_ascii=False, indent=1)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------- «Поделиться»
+def _env_path(var, *parts):
+    base = os.environ.get(var, "")
+    return os.path.join(base, *parts) if base else ""
+
+
+def find_exe(paths):
+    return next((p for p in paths if p and os.path.isfile(p)), None)
+
+
+def has_protocol(name):
+    if not IS_WIN:
+        return False
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, name + r"\shell\open\command"):
+            return True
+    except OSError:
+        return False
+
+
+def start_target(target):
+    try:
+        if IS_WIN and not os.path.isfile(target):
+            os.startfile(target)
+        elif os.path.isfile(target):
+            subprocess.Popen([target])
+        else:
+            return False
+        return True
+    except Exception:
+        return False
 
 
 def copy_image_to_clipboard(img, hwnd):
@@ -226,20 +229,20 @@ def copy_image_to_clipboard(img, hwnd):
     def put(fmt, data):
         handle = kernel32.GlobalAlloc(0x0002, len(data))  # GMEM_MOVEABLE
         if not handle:
-            raise MemoryError("не хватило памяти")
+            raise MemoryError("GlobalAlloc")
         ptr = kernel32.GlobalLock(handle)
         ctypes.memmove(ptr, data, len(data))
         kernel32.GlobalUnlock(handle)
         if not user32.SetClipboardData(fmt, handle):
             kernel32.GlobalFree(handle)
-            raise OSError("Windows не приняла картинку")
+            raise OSError("SetClipboardData")
 
     for _ in range(20):
         if user32.OpenClipboard(hwnd):
             break
         time.sleep(0.05)
     else:
-        raise OSError("буфер обмена занят другой программой")
+        raise OSError("clipboard busy")
     try:
         user32.EmptyClipboard()
         put(8, bmp.getvalue()[14:])  # CF_DIB: BMP без файлового заголовка
@@ -254,15 +257,18 @@ class App:
     def __init__(self, root):
         self.root = root
         self.scale = max(1.0, float(root.winfo_fpixels("1i")) / 96.0)
-        self.names = core.key_names()
+        self.prefs = load_prefs()
+        i18n.set_lang(self.prefs["lang"])
+        self.morse_cfg = self.prefs["morse"]
+        self.sstv_mode = self.prefs["sstv"] or None
         self.today = dt.date.today()
         self.auto_idx = core.auto_key_index(self.today)
         self.qr_mat = None          # матрица текущего QR-кода
-        self.qr_note = None         # почему QR-кода нет
-        self.cipher_key = ""        # каким ключом сделана или расшифрована шифровка
+        self.qr_err = None          # почему QR-кода нет (ошибка ядра)
+        self.cipher_kid = None      # ключ текущей шифровки: ("list", n) / ("phrase", текст) / ("empty",)
         self._b32_prog = self._b32_last = ""
         self._morse_prog = self._morse_last = ""
-        self._morse_src = None      # шифровка, из которой сделана морзянка в поле
+        self._morse_src = None
         self._b32_job = self._morse_job = self._bs_job = None
         self._bs_press_t = 0.0
         self._toast_win = self._toast_job = None
@@ -270,21 +276,21 @@ class App:
         self._redraw_job = None
         self._drag_on = False
         self._status_err = False
-        self._placeholders = {}
+        self._qr_box = None
+        self._menu_vars = []
         self.history, self.hpos = [], -1          # операции этого сеанса
         self.form_seq, self.form_numbers = 0, {}  # номера бланков этого сеанса
-        self.morse_cfg = dict(morse.DEFAULTS)
         self.player = morse.Player()
         self._playing, self._play_job, self._glow_i, self._wav_n = False, None, 0, 0
-        self._play_text, self._play_events, self._play_total, self._play_next, self._play_t0 = "", [], 0, 0, 0.0
+        self._play = {}
+        self._sstv_active, self._sstv_job, self._sstv_frac = False, None, None
         self._art_src = Image.open(resource("assets", "background.jpg")).convert("RGB")
         self._art_cache = {}
         self._make_fonts()
         self._make_style()
-        self._make_sound_frames()
+        self._make_images()
         self._build()
-        self._bind_keys()
-        self._setup_dnd()
+        self._bind_global()
         self._commit()
         self.root.after(60_000, self._day_tick)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -295,6 +301,11 @@ class App:
     def _on_close(self):
         self.player.stop()
         self.root.destroy()
+
+    def _save_prefs(self):
+        self.prefs["morse"] = self.morse_cfg
+        self.prefs["sstv"] = self.sstv_mode or ""
+        save_prefs(self.prefs)
 
     # ------------------------------------------------------------------ вид
     def _make_fonts(self):
@@ -321,9 +332,6 @@ class App:
         self.f_btn_small = pick(ui_bold, 9)
         self.f_arrow = pick(ui_bold, 13)
         self.f_body = pick(ui, 10)
-        self.f_link = pick(ui, 10)
-        self.f_link_hover = pick(ui, 10)
-        self.f_link_hover.configure(underline=True)
         self.f_small = pick(ui, 9)
         self.f_text = pick(ui, 11)
         self.f_mono = pick(mono, 11)
@@ -353,12 +361,11 @@ class App:
                      arrowcolor=C["muted"], gripcount=0)
         st.map("Mars.Vertical.TScrollbar", background=[("active", C["faint"])])
 
-    def _make_sound_frames(self):
-        """Значок звука: кадр 0 — спокойный, кадры 1–13 — мягкое свечение."""
+    def _make_images(self):
         size, pad = self.px(28), self.px(5)
         full = size + 2 * pad
         icon = Image.open(resource("assets", "sound.png")).convert("RGBA").resize((size, size), Image.LANCZOS)
-        frames = []
+        self._snd_frames = []
         for k in range(14):
             im = Image.new("RGBA", (full, full), (0, 0, 0, 0))
             if k:
@@ -368,30 +375,35 @@ class App:
                 ImageDraw.Draw(halo).ellipse((c - r, c - r, c + r, c + r), fill=(255, 186, 0, int(190 * glow)))
                 im.alpha_composite(halo.filter(ImageFilter.GaussianBlur(pad * 0.55)))
             im.alpha_composite(icon, (pad, pad))
-            frames.append(ImageTk.PhotoImage(im))
-        self._snd_frames = frames
+            self._snd_frames.append(ImageTk.PhotoImage(im))
+        s = self.px(38)
+        hdr = Image.open(resource("assets", "icon.png")).convert("RGBA").resize((s, s), Image.LANCZOS)
+        self._hdr_icon = ImageTk.PhotoImage(hdr)
+        self._icon_photo = ImageTk.PhotoImage(Image.open(resource("assets", "icon.png")))
+        lang = Image.open(resource("assets", "lang.png")).convert("RGBA")
+        self._lang_icon = ImageTk.PhotoImage(lang.resize((self.px(34), self.px(24)), Image.LANCZOS))
+        menu_img = Image.open(resource("assets", "menu.png")).convert("RGBA")
+        self._menu_icon = ImageTk.PhotoImage(menu_img.resize((self.px(22), self.px(18)), Image.LANCZOS))
 
-    def _button(self, parent, text, command, kind="secondary", font=None, padx=14, pady=6):
+    def _button(self, parent, text, command, kind="secondary", font=None, padx=14, pady=6, **extra):
         bg, fg, hover, border = {
             "primary": (C["mars"], "#FFFFFF", C["mars_hover"], C["mars"]),
             "secondary": (C["card"], C["ink"], C["hover"], C["line"]),
+            "outline": (C["paper"], C["mars"], C["mars_soft"], C["mars"]),
             "dark": (C["space"], C["space_text"], C["space_hover"], "#3A3F4D"),
         }[kind]
         b = tk.Button(parent, text=text, command=command, font=font or self.f_btn, bg=bg, fg=fg,
                       activebackground=hover, activeforeground=fg, relief="flat", bd=0, justify="center",
-                      highlightthickness=1, highlightbackground=border,
+                      highlightthickness=1, highlightbackground=border, disabledforeground=C["faint"],
                       highlightcolor=C["ink"] if kind == "primary" else C["mars"],
-                      padx=self.px(padx), pady=self.px(pady), cursor="hand2")
-        b.bind("<Enter>", lambda e: b.configure(bg=hover))
+                      padx=self.px(padx), pady=self.px(pady), cursor="hand2", **extra)
+        b.bind("<Enter>", lambda e: b.configure(bg=hover) if str(b["state"]) != "disabled" else None)
         b.bind("<Leave>", lambda e: b.configure(bg=bg))
         return b
 
-    def _link(self, parent, text, command):
-        lbl = tk.Label(parent, text=text, font=self.f_link, fg=C["mars"], bg=parent.cget("bg"), cursor="hand2")
-        lbl.bind("<Button-1>", lambda e: command())
-        lbl.bind("<Enter>", lambda e: lbl.configure(fg=C["mars_hover"], font=self.f_link_hover))
-        lbl.bind("<Leave>", lambda e: lbl.configure(fg=C["mars"], font=self.f_link))
-        return lbl
+    def _small(self, parent, text, command):
+        """Контурная кнопка «Копировать» / «Вставить»."""
+        return self._button(parent, text, command, "outline", font=self.f_btn_small, padx=8, pady=1)
 
     def _heading(self, parent, text):
         return tk.Label(parent, text=text, font=self.f_head, fg=C["ink"], bg=parent.cget("bg"))
@@ -402,9 +414,12 @@ class App:
         lbl.bind("<Configure>", lambda e: lbl.configure(wraplength=max(self.px(120), e.width - 4)))
         return lbl
 
-    def _menu(self):
-        return tk.Menu(self.root, tearoff=0, font=self.f_body, bg=C["card"], fg=C["ink"],
+    def _menu(self, parent=None):
+        return tk.Menu(parent or self.root, tearoff=0, font=self.f_body, bg=C["card"], fg=C["ink"],
                        activebackground=C["mars"], activeforeground="#FFFFFF", bd=1, relief="solid")
+
+    def _popup_under(self, menu, widget):
+        menu.tk_popup(widget.winfo_rootx(), widget.winfo_rooty() + widget.winfo_height())
 
     def _textbox(self, parent, font, wrap):
         box = tk.Frame(parent, bg=C["card"])
@@ -414,7 +429,7 @@ class App:
                     insertbackground=C["ink"], selectbackground=C["mars_soft"], selectforeground=C["ink"],
                     inactiveselectbackground=C["mars_soft"], relief="flat", bd=0, highlightthickness=1,
                     highlightbackground=C["line"], highlightcolor=C["mars"], padx=self.px(12),
-                    pady=self.px(10), undo=True, maxundo=-1, spacing2=self.px(2))
+                    pady=self.px(10), undo=True, maxundo=-1, spacing2=self.px(2), insertwidth=self.px(2))
         sb = ttk.Scrollbar(box, orient="vertical", command=t.yview, style="Mars.Vertical.TScrollbar")
 
         def on_scroll(first, last):
@@ -472,23 +487,24 @@ class App:
     # ------------------------------------------------------------------ окно
     def _build(self):
         r = self.root
-        r.title("Код Марса")
+        r.title(T("Код Марса"))
         r.configure(bg=C["paper"])
+        self._placeholders = {}
         try:
             if IS_WIN:
                 r.iconbitmap(default=resource("assets", "icon.ico"))
         except tk.TclError:
             pass
         try:
-            self._icon_photo = ImageTk.PhotoImage(Image.open(resource("assets", "icon.png")))
             r.iconphoto(True, self._icon_photo)
         except Exception:
             pass
-        sw, sh = r.winfo_screenwidth(), r.winfo_screenheight()
-        w, h = min(self.px(1180), sw - self.px(40)), min(self.px(720), sh - self.px(90))
-        r.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 2 - self.px(20))}")
-        r.minsize(min(self.px(1120), w), min(self.px(620), h))
-
+        if not getattr(self, "_geometry_set", False):
+            sw, sh = r.winfo_screenwidth(), r.winfo_screenheight()
+            w, h = min(self.px(1240), sw - self.px(40)), min(self.px(740), sh - self.px(90))
+            r.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 2 - self.px(20))}")
+            r.minsize(min(self.px(1180), w), min(self.px(640), h))
+            self._geometry_set = True
         self._build_header()
         body = tk.Frame(r, bg=C["paper"])
         body.pack(fill="both", expand=True, padx=self.px(20), pady=(self.px(16), self.px(18)))
@@ -504,17 +520,17 @@ class App:
         self._build_message(cols[0])
         self._build_cipher(cols[1])
         self._build_qr(cols[2])
+        self._bind_widgets()
+        self._setup_dnd()
+        self._update_nav()
 
     def _build_header(self):
         self.header = tk.Canvas(self.root, height=self.px(60), bg=C["space"], highlightthickness=0, bd=0)
         self.header.pack(fill="x")
-        size = self.px(38)
-        icon = Image.open(resource("assets", "icon.png")).convert("RGBA").resize((size, size), Image.LANCZOS)
-        mask = Image.new("L", icon.size, 0)
-        ImageDraw.Draw(mask).rounded_rectangle((0, 0, size - 1, size - 1), radius=self.px(9), fill=255)
-        icon.putalpha(mask)
-        self._hdr_icon = ImageTk.PhotoImage(icon)
-        self.help_btn = self._button(self.header, "Справка", self.show_help, "dark")
+        self.menu_btn = self._button(self.header, "", self._main_menu, "dark", padx=8, pady=6, image=self._menu_icon)
+        self.lang_btn = self._button(self.header, " " + T("Язык"), self._lang_menu, "dark", padx=10, pady=3,
+                                     image=self._lang_icon, compound="left")
+        self.help_btn = self._button(self.header, T("Справка"), self.show_help, "dark")
         self.back_btn = self._button(self.header, "←", self.history_back, "dark", font=self.f_arrow, padx=10, pady=1)
         self.fwd_btn = self._button(self.header, "→", self.history_forward, "dark", font=self.f_arrow, padx=10, pady=1)
         self.header.bind("<Configure>", lambda e: self._draw_header())
@@ -529,12 +545,13 @@ class App:
             b = rnd.randint(60, 190)
             s = 2 if rnd.random() < 0.15 else 1
             cv.create_rectangle(x, y, x + s, y + s, fill=f"#{b:02x}{b:02x}{min(255, b + 18):02x}", outline="")
-        pad = self.px(20)
-        cv.create_image(pad, h // 2, image=self._hdr_icon, anchor="w")
-        cv.create_text(pad + self.px(52), h // 2, text="Код Марса", font=self.f_title,
-                       fill=C["space_text"], anchor="w")
+        pad = self.px(16)
+        cv.create_window(pad, h // 2, window=self.menu_btn, anchor="w")
+        x = pad + self.menu_btn.winfo_reqwidth() + self.px(14)
+        cv.create_image(x, h // 2, image=self._hdr_icon, anchor="w")
+        cv.create_text(x + self.px(50), h // 2, text=T("Код Марса"), font=self.f_title, fill=C["space_text"], anchor="w")
         x = w - pad
-        for btn, gap in ((self.fwd_btn, 6), (self.back_btn, 18), (self.help_btn, 0)):
+        for btn, gap in ((self.fwd_btn, 6), (self.back_btn, 18), (self.help_btn, 10), (self.lang_btn, 0)):
             cv.create_window(x, h // 2, window=btn, anchor="e")
             x -= btn.winfo_reqwidth() + self.px(gap)
 
@@ -543,45 +560,54 @@ class App:
         f.grid_rowconfigure(1, weight=1)
         top = tk.Frame(f, bg=C["paper"])
         top.grid(row=0, column=0, sticky="ew", pady=(0, self.px(8)))
-        self._heading(top, "Сообщение").pack(side="left")
-        self._button(top, "Очистить всё", self.clear_all, "primary", font=self.f_btn_small,
+        self._heading(top, T("Сообщение")).pack(side="left")
+        self._button(top, T("Очистить всё"), self.clear_all, "primary", font=self.f_btn_small,
                      padx=10, pady=2).pack(side="right")
         box, self.msg = self._textbox(f, self.f_text, "word")
         box.grid(row=1, column=0, sticky="nsew")
-        self._placeholder(self.msg, "Напишите сообщение и нажмите Enter. "
-                                    "Расшифрованный текст тоже появляется здесь.")
-        self._note(f, "Shift+Enter переносит строку. Если удерживать Backspace 2 секунды, "
-                      "очистятся все поля.").grid(row=2, column=0, sticky="ew", pady=(self.px(6), 0))
+        self._placeholder(self.msg, T("Напишите сообщение и нажмите Enter. Расшифрованный текст тоже появляется здесь."))
+        self._note(f, T("Shift+Enter переносит строку. Если удерживать Backspace 2 секунды, очистятся все поля.")).grid(
+            row=2, column=0, sticky="ew", pady=(self.px(6), 0))
         key = tk.Frame(f, bg=C["paper"])
         key.grid(row=3, column=0, sticky="ew", pady=(self.px(16), 0))
         self._build_key(key)
         btns = tk.Frame(f, bg=C["paper"])
         btns.grid(row=4, column=0, sticky="ew", pady=(self.px(18), 0))
-        self._button(btns, "Зашифровать", self.encrypt, "primary").pack(side="left")
-        self._button(btns, "Расшифровать", self.decrypt_manual).pack(side="left", padx=(self.px(8), 0))
+        self._button(btns, T("Зашифровать"), self.encrypt, "primary").pack(side="left")
+        self._button(btns, T("Расшифровать"), self.decrypt_manual).pack(side="left", padx=(self.px(8), 0))
+
+    def _key_name(self, idx):
+        return T("Универсальный") if idx == 0 else T("Код {n}", n=idx)
+
+    def _key_label(self, kid):
+        if not kid:
+            return "—"
+        if kid[0] == "list":
+            return self._key_name(kid[1])
+        if kid[0] == "phrase":
+            return kid[1]
+        return T("пустая ключ-фраза")
 
     def _build_key(self, f):
         f.grid_columnconfigure(0, weight=1)
         row = tk.Frame(f, bg=C["paper"])
         row.grid(row=0, column=0, sticky="ew")
-        self._heading(row, "Ключ").pack(side="left")
+        self._heading(row, T("Ключ")).pack(side="left")
         self.mode = tk.StringVar(value="list")
-        for text, value in (("Выбрать ключ", "list"), ("Ключ-фраза", "phrase")):
+        for text, value in ((T("Выбрать ключ"), "list"), (T("Ключ-фраза"), "phrase")):
             tk.Radiobutton(row, text=text, value=value, variable=self.mode, command=self._on_mode,
                            font=self.f_body, bg=C["paper"], fg=C["ink"], activebackground=C["paper"],
                            activeforeground=C["ink"], selectcolor=C["card"], highlightthickness=0,
                            bd=0, cursor="hand2").pack(side="left", padx=(self.px(18), 0))
-
         self.list_frame = tk.Frame(f, bg=C["paper"])
-        self.combo = ttk.Combobox(self.list_frame, state="readonly", style="Mars.TCombobox",
-                                  font=self.f_text, values=self.names, height=17)
+        self.combo = ttk.Combobox(self.list_frame, state="readonly", style="Mars.TCombobox", font=self.f_text,
+                                  values=[self._key_name(i) for i in range(len(core.BUILTIN_KEYS))], height=17)
         self.combo.current(self.auto_idx)
         self.combo.pack(fill="x")
         self.combo.bind("<<ComboboxSelected>>", lambda e: self.combo.selection_clear())
-        self._note(self.list_frame, "Автокод: каждый день выбирается ключ с номером текущего числа, "
-                                    "как на телефоне. Если сообщение зашифровано ключом другого дня, "
-                                    "программа подберёт ключ сама.").pack(fill="x", pady=(self.px(6), 0))
-
+        self._note(self.list_frame, T("Автокод: каждый день выбирается ключ с номером текущего числа, как на телефоне. "
+                                      "Если сообщение зашифровано ключом другого дня, программа подберёт ключ сама.")).pack(
+            fill="x", pady=(self.px(6), 0))
         self.phrase_frame = tk.Frame(f, bg=C["paper"])
         self.phrase = tk.StringVar()
         self.phrase.trace_add("write", lambda *a: self._update_hex())
@@ -591,18 +617,18 @@ class App:
                                      highlightcolor=C["mars"])
         self.phrase_entry.pack(fill="x")
         self.phrase_entry.bind("<Button-3>", self._text_menu)
-        self._placeholder(self.phrase_entry, "Введите ключ-фразу")
+        self._placeholder(self.phrase_entry, T("Введите ключ-фразу"))
         hexrow = tk.Frame(self.phrase_frame, bg=C["paper"])
         hexrow.pack(fill="x", pady=(self.px(6), 0))
-        tk.Label(hexrow, text="HEX-ключ:", font=self.f_small, fg=C["muted"], bg=C["paper"]).pack(side="left")
+        tk.Label(hexrow, text=T("HEX-ключ:"), font=self.f_small, fg=C["muted"], bg=C["paper"]).pack(side="left")
         self.hex_var = tk.StringVar()
         tk.Entry(hexrow, textvariable=self.hex_var, state="readonly", font=self.f_mono_small,
                  readonlybackground=C["paper"], fg=C["ink"], relief="flat", bd=0,
                  highlightthickness=0, width=10).pack(side="left", fill="x", expand=True,
                                                      padx=(self.px(6), self.px(8)))
-        self._link(hexrow, "Копировать", lambda: self._copy(self.hex_var.get(), "HEX-ключ скопирован")).pack(side="right")
-        self._note(self.phrase_frame, "Ключ вычисляется из фразы через SHA-256 так же, как на телефоне. "
-                                      "У получателя должна быть та же фраза.").pack(fill="x", pady=(self.px(4), 0))
+        self._small(hexrow, T("Копировать"), lambda: self._copy(self.hex_var.get(), T("HEX-ключ скопирован"))).pack(side="right")
+        self._note(self.phrase_frame, T("Ключ вычисляется из фразы через SHA-256 так же, как на телефоне. "
+                                        "У получателя должна быть та же фраза.")).pack(fill="x", pady=(self.px(4), 0))
         self._on_mode()
 
     def _build_cipher(self, f):
@@ -611,59 +637,179 @@ class App:
         f.grid_rowconfigure(4, weight=2)
         top = tk.Frame(f, bg=C["paper"])
         top.grid(row=0, column=0, sticky="ew", pady=(0, self.px(8)))
-        self._heading(top, "Шифровка Base32").pack(side="left")
-        self._link(top, "Вставить", self.paste_cipher).pack(side="right")
-        self._link(top, "Копировать", lambda: self._copy(self.b32_get(), "Шифровка скопирована")).pack(
-            side="right", padx=(0, self.px(16)))
+        self._heading(top, T("Шифровка Base32")).pack(side="left")
+        self._small(top, T("Вставить"), self.paste_cipher).pack(side="right")
+        self._small(top, T("Копировать"), lambda: self._copy(self.b32_get(), T("Шифровка скопирована"))).pack(
+            side="right", padx=(0, self.px(8)))
         box, self.b32 = self._textbox(f, self.f_mono, "char")
         box.grid(row=1, column=0, sticky="nsew")
-        self._placeholder(self.b32, "Здесь появится шифровка. Чтобы расшифровать сообщение, "
-                                    "вставьте сюда его шифровку: программа расшифрует её сама.")
+        self.b32.tag_configure("sent", foreground=C["mars"], underline=True)
+        self.b32.tag_configure("sending", foreground=C["mars"], background=C["mars_soft"], underline=True)
+        self._placeholder(self.b32, T("Здесь появится шифровка. Чтобы расшифровать сообщение, вставьте сюда его "
+                                      "шифровку: программа расшифрует её сама."))
         self.status = self._note(f, "")
         self.status.grid(row=2, column=0, sticky="ew", pady=(self.px(6), self.px(12)))
         mid = tk.Frame(f, bg=C["paper"])
         mid.grid(row=3, column=0, sticky="ew", pady=(0, self.px(6)))
-        self._heading(mid, "Азбука Морзе").pack(side="left")
+        self._heading(mid, T("Азбука Морзе")).pack(side="left")
         self.sound_btn = tk.Label(mid, image=self._snd_frames[0], bg=C["paper"], bd=0, cursor="hand2")
-        self.sound_btn.pack(side="left", padx=(self.px(4), 0))
+        self.sound_btn.pack(side="left", padx=(self.px(2), 0))
         self.sound_btn.bind("<Button-1>", lambda e: self.toggle_sound())
-        self._button(mid, "Настройка\nазбуки Морзе", self.show_morse_settings, font=self.f_btn_small,
+        self._button(mid, T("Настройка\nазбуки Морзе"), self.show_morse_settings, font=self.f_btn_small,
                      padx=6, pady=1).pack(side="right")
-        self._link(mid, "Копировать", lambda: self._copy(self.morse_get(), "Морзянка скопирована")).pack(
-            side="right", padx=(0, self.px(12)))
+        self._small(mid, T("Копировать"), lambda: self._copy(self.morse_get(), T("Морзянка скопирована"))).pack(
+            side="right", padx=(0, self.px(8)))
         box2, self.morse = self._textbox(f, self.f_mono, "word")
         box2.grid(row=4, column=0, sticky="nsew")
-        self.morse.tag_configure("played", foreground=C["mars"])
-        self._placeholder(self.morse, "Морзянка появится после шифрования. Сюда можно вставить принятую "
-                                      "морзянку или написать текст и нажать Enter.")
+        self.morse.tag_configure("played", foreground=C["mars"], underline=True)
+        self.morse.tag_configure("current", background=C["mars_soft"])
+        self._placeholder(self.morse, T("Морзянка появится после шифрования. Сюда можно вставить принятую морзянку "
+                                        "или написать текст и нажать Enter."))
 
     def _build_qr(self, f):
         f.grid_columnconfigure(0, weight=1)
         f.grid_rowconfigure(0, weight=1)
-        self.qr_cv = tk.Canvas(f, width=self.px(320), height=self.px(300), bg=C["card"],
+        self.qr_cv = tk.Canvas(f, width=self.px(320), height=self.px(260), bg=C["card"],
                                highlightthickness=1, highlightbackground=C["line"], bd=0)
         self.qr_cv.grid(row=0, column=0, sticky="nsew")
         self.qr_cv.bind("<Configure>", lambda e: self._schedule_qr_redraw())
         self.qr_cv.bind("<Button-3>", self._qr_menu)
         s = self.px(4)
+        tv = tk.Frame(f, bg=C["paper"])
+        tv.grid(row=1, column=0, sticky="ew", pady=(self.px(8), 0))
+        tv.grid_columnconfigure(0, weight=1, uniform="tv")
+        tv.grid_columnconfigure(1, weight=1, uniform="tv")
+        self.sstv_btn = self._button(tv, T("Передать SSTV"), self.toggle_sstv, "primary", font=self.f_btn_small, padx=6)
+        self.sstv_btn.grid(row=0, column=0, sticky="ew", padx=(0, s))
+        self.sstv_mode_btn = self._button(tv, "", self._sstv_menu, font=self.f_btn_small, padx=6)
+        self.sstv_mode_btn.grid(row=0, column=1, sticky="ew", padx=(s, 0))
+        self._sstv_buttons()
         g = tk.Frame(f, bg=C["paper"])
-        g.grid(row=1, column=0, sticky="ew", pady=(self.px(12), 0))
+        g.grid(row=2, column=0, sticky="ew", pady=(self.px(8), 0))
         for i in range(3):
             g.grid_columnconfigure(i, weight=1, uniform="q3")
-        self._button(g, "Сохранить QR", self.save_qr, font=self.f_btn_small, padx=6).grid(
+        self._button(g, T("Сохранить QR"), self.save_qr, font=self.f_btn_small, padx=6).grid(
             row=0, column=0, sticky="ew", padx=(0, s))
-        self._button(g, "Копировать QR", self.copy_qr, font=self.f_btn_small, padx=6).grid(
+        self._button(g, T("Копировать QR"), self.copy_qr, font=self.f_btn_small, padx=6).grid(
             row=0, column=1, sticky="ew", padx=s)
-        self.open_btn = self._button(g, "Открыть QR", self._open_menu, font=self.f_btn_small, padx=6)
+        self.open_btn = self._button(g, T("Открыть QR"), self._open_menu, font=self.f_btn_small, padx=6)
         self.open_btn.grid(row=0, column=2, sticky="ew", padx=(s, 0))
         g2 = tk.Frame(f, bg=C["paper"])
-        g2.grid(row=2, column=0, sticky="ew", pady=(self.px(8), 0))
+        g2.grid(row=3, column=0, sticky="ew", pady=(self.px(8), 0))
         g2.grid_columnconfigure(0, weight=1, uniform="q2")
         g2.grid_columnconfigure(1, weight=1, uniform="q2")
-        self._button(g2, "Бланк шифровки\npng", self.form_png, font=self.f_btn_small, padx=6, pady=3).grid(
+        self._button(g2, T("Бланк шифровки\npng"), self.form_png, font=self.f_btn_small, padx=6, pady=3).grid(
             row=0, column=0, sticky="ew", padx=(0, s))
-        self._button(g2, "Бланк шифровки\ndoc", self.form_docx, font=self.f_btn_small, padx=6, pady=3).grid(
+        self._button(g2, T("Бланк шифровки\ndoc"), self.form_docx, font=self.f_btn_small, padx=6, pady=3).grid(
             row=0, column=1, sticky="ew", padx=(s, 0))
+
+    # ------------------------------------------------------------------ язык и меню
+    def set_language(self, code):
+        if code == i18n.lang():
+            return
+        state = (self.msg_get(), self.b32_get(), self.morse_get(), self.mode.get(), self.phrase.get(),
+                 self.combo.current(), self.status.cget("text"), self._status_err)
+        self.stop_sound()
+        self.stop_sstv()
+        i18n.set_lang(code)
+        self.prefs["lang"] = code
+        self._save_prefs()
+        for w in self.root.winfo_children():
+            w.destroy()
+        self._help_win = self._settings_win = self._toast_win = None
+        self._drag_on = False
+        self._build()
+        msg, b32, mrs, mode, phrase, idx, status, err = state
+        self.mode.set(mode)
+        self._on_mode()
+        self.phrase.set(phrase)
+        self.combo.current(idx if idx >= 0 else self.auto_idx)
+        self._set(self.msg, msg)
+        self._set_b32(b32)
+        self._set_morse(mrs, src=self._morse_src)
+        self._set_status("")  # прежняя строка состояния была на другом языке
+        self._update_drag_source()
+        self._schedule_qr_redraw()
+
+    def _lang_menu(self):
+        m = self._menu()
+        self._lang_var = tk.StringVar(value=i18n.lang())
+        for code, name, _ in i18n.LANGS:
+            m.add_radiobutton(label=name, value=code, variable=self._lang_var,
+                              command=lambda c=code: self.root.after(10, lambda: self.set_language(c)))
+        self._popup_under(m, self.lang_btn)
+
+    def _main_menu(self):
+        m = self._menu()
+        m.add_command(label=T("Поделиться: показывать в меню"), state="disabled")
+        self._menu_vars = []
+        for key, name in SHARE_APPS:
+            var = tk.BooleanVar(value=self.prefs["share"].get(key, True))
+            self._menu_vars.append(var)
+            m.add_checkbutton(label=name, variable=var, command=lambda k=key, v=var: self._toggle_share(k, v.get()))
+        m.add_separator()
+        m.add_command(label=T("Открыть папку «Код Марса»"), command=lambda: open_folder(output_dir()))
+        m.add_command(label=T("Справка"), command=self.show_help)
+        self._popup_under(m, self.menu_btn)
+
+    def _toggle_share(self, key, on):
+        self.prefs["share"][key] = bool(on)
+        self._save_prefs()
+
+    def _add_share(self, menu, text_fn=None, image=False):
+        sub = self._menu(menu)
+        apps = [(k, n) for k, n in SHARE_APPS if self.prefs["share"].get(k, True)]
+        for key, name in apps:
+            sub.add_command(label=name, command=(lambda k=key: self.share(k, image=True)) if image
+                            else (lambda k=key: self.share(k, text=text_fn())))
+        menu.add_cascade(label=T("Поделиться"), menu=sub, state="normal" if apps else "disabled")
+
+    def share(self, app, text=None, image=False):
+        """Копирует шифровку, морзянку или QR-код и открывает мессенджер."""
+        name = dict(SHARE_APPS)[app]
+        if image:
+            if not self._need_qr():
+                return
+            if not IS_WIN:
+                self.toast(T("Копирование картинки работает в Windows. Используйте «Сохранить QR»"), error=True)
+                return
+            try:
+                copy_image_to_clipboard(self._qr_export(), self.root.winfo_id())
+            except Exception as e:
+                self.toast(T("Не удалось скопировать картинку: {e}", e=e), error=True)
+                return
+        else:
+            if not text or not text.strip():
+                self.toast(T("Нечем поделиться: поле пустое"), error=True)
+                return
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text.strip())
+        opened = prefilled = False
+        if app == "telegram":
+            exe = find_exe([_env_path("APPDATA", "Telegram Desktop", "Telegram.exe")])
+            if not image and (exe or has_protocol("tg")):
+                opened = prefilled = start_target("tg://msg?text=" + urllib.parse.quote(text.strip()))
+            if not opened and exe:
+                opened = start_target(exe)
+            if not opened:
+                opened = webbrowser.open("https://web.telegram.org/")
+        elif app == "viber":
+            exe = find_exe([_env_path("LOCALAPPDATA", "Viber", "Viber.exe")])
+            opened = start_target(exe) if exe else (has_protocol("viber") and start_target("viber://"))
+        elif app == "instagram":
+            opened = webbrowser.open("https://www.instagram.com/direct/inbox/")
+        elif app == "deltachat":
+            exe = find_exe([_env_path("LOCALAPPDATA", "Programs", "deltachat-desktop", "DeltaChat.exe"),
+                            _env_path("ProgramFiles", "DeltaChat", "DeltaChat.exe"),
+                            _env_path("LOCALAPPDATA", "Programs", "DeltaChat", "DeltaChat.exe")])
+            opened = start_target(exe) if exe else False
+        if prefilled:
+            self.toast(T("В {app} выберите чат: текст уже подготовлен", app=name))
+        elif opened:
+            self.toast(T("Скопировано. В {app} выберите чат и нажмите Ctrl+V", app=name))
+        else:
+            self.toast(T("{app} не найден на этом компьютере. Содержимое скопировано: откройте {app} и нажмите Ctrl+V",
+                         app=name), error=True)
 
     # ------------------------------------------------------------------ QR-холст
     def _schedule_qr_redraw(self):
@@ -689,41 +835,52 @@ class App:
     def _redraw_qr(self):
         self._redraw_job = None
         cv = self.qr_cv
-        w, h = cv.winfo_width(), cv.winfo_height()
+        try:
+            w, h = cv.winfo_width(), cv.winfo_height()
+        except tk.TclError:
+            return
         if w < 20 or h < 20:
             return
         cv.delete("all")
+        self._qr_box = None
         cv.create_image(0, 0, image=self._art(w, h, self.qr_mat is not None), anchor="nw")
         if self.qr_mat is not None:
             n = len(self.qr_mat)
-            mod = max(1, min(w - self.px(60), int(h * 0.62)) // n)
+            mod = max(1, min(w - self.px(60), int(h * 0.66)) // n)
             size = n * mod
             self._qr_photo = ImageTk.PhotoImage(core.qr_image(self.qr_mat, mod))
             pad, cap = self.px(12), self.px(30)
-            x0, y0 = w // 2 - size // 2 - pad, int(h * 0.43) - size // 2 - pad
+            x0, y0 = w // 2 - size // 2 - pad, int(h * 0.44) - size // 2 - pad
             x1, y1 = x0 + size + 2 * pad, y0 + size + 2 * pad + cap
             cv.create_rectangle(x0 + 3, y0 + 4, x1 + 3, y1 + 4, fill="#E6DED0", outline="")
             cv.create_rectangle(x0, y0, x1, y1, fill="#FFFFFF", outline=C["line"])
-            cv.create_image(w // 2, y0 + pad + size // 2, image=self._qr_photo)
-            cv.create_text(w // 2, y1 - cap // 2 - self.px(2), text=f"Ключ: {self.cipher_key}",
+            qx, qy = w // 2 - size // 2, y0 + pad
+            cv.create_image(qx, qy, image=self._qr_photo, anchor="nw")
+            self._qr_box = (qx, qy, qx + size, qy + size)
+            cv.create_text(w // 2, y1 - cap // 2 - self.px(2), text=T("Ключ: {key}", key=self._key_label(self.cipher_kid)),
                            width=size + 2 * pad - self.px(8), font=self.f_small, fill=C["muted"])
         else:
-            text = self.qr_note or ("Здесь появится QR-код.\nЧтобы расшифровать картинку с QR, "
-                                    "перетащите её в окно или нажмите «Открыть QR».")
-            cv.create_text(w // 2, h - self.px(62), text=text, width=w - self.px(48), justify="center",
-                           font=self.f_small, fill=C["mars"] if self.qr_note else C["muted"])
+            text = self._err(self.qr_err) if self.qr_err else T(
+                "Здесь появится QR-код.\nЧтобы расшифровать картинку с QR, перетащите её в окно или нажмите «Открыть QR».")
+            cv.create_text(w // 2, h - self.px(56), text=text, width=w - self.px(48), justify="center",
+                           font=self.f_small, fill=C["mars"] if self.qr_err else C["muted"])
+        self._sstv_overlay()
 
-    def _show_qr(self, b32, key_label):
-        self.cipher_key = key_label
+    def _show_qr(self, b32, kid):
+        self.cipher_kid = kid
         try:
-            self.qr_mat, self.qr_note = core.qr_matrix(b32), None
+            self.qr_mat, self.qr_err = core.qr_matrix(b32), None
         except core.MarsError as e:
-            self.qr_mat, self.qr_note = None, str(e)
+            self.qr_mat, self.qr_err = None, e
         self._update_drag_source()
         self._redraw_qr()
 
     def _qr_export(self):
         return core.qr_image(self.qr_mat, max(4, 640 // len(self.qr_mat)))
+
+    def _err(self, e):
+        code = getattr(e, "code", None)
+        return T(i18n.ERRORS[code], **getattr(e, "params", {})) if code in i18n.ERRORS else str(e)
 
     # ------------------------------------------------------------------ поля
     def msg_get(self):
@@ -748,7 +905,6 @@ class App:
     def _set_morse(self, value, src=None):
         self._morse_prog, self._morse_src = value.strip(), src
         self._set(self.morse, value)
-        self.morse.tag_remove("played", "1.0", "end")
 
     def _morse_for(self, b32):
         return morse.encode(b32, "latin", self.morse_cfg["separator"])[0]
@@ -759,7 +915,7 @@ class App:
 
     def _copy(self, text, done):
         if not text.strip():
-            self.toast("Поле пустое, копировать нечего", error=True)
+            self.toast(T("Поле пустое, копировать нечего"), error=True)
             return
         self.root.clipboard_clear()
         self.root.clipboard_append(text)
@@ -772,7 +928,7 @@ class App:
 
     # ------------------------------------------------------------------ история операций
     def _state(self):
-        return (self.msg_get(), self.b32_get(), self.morse_get(), self.cipher_key,
+        return (self.msg_get(), self.b32_get(), self.morse_get(), self.cipher_kid,
                 self.status.cget("text"), self._status_err)
 
     def _commit(self):
@@ -786,8 +942,9 @@ class App:
         self._update_nav()
 
     def _apply_state(self, st):
-        msg, b32, mrs, key, status, err = st
+        msg, b32, mrs, kid, status, err = st
         self.stop_sound()
+        self.stop_sstv()
         self._set(self.msg, msg)
         self._set_b32(b32)
         self._b32_last = b32.strip()
@@ -796,18 +953,18 @@ class App:
         cipher = self._cipher_in_field()
         self._morse_src = cipher
         if cipher:
-            self._show_qr(cipher, key)
+            self._show_qr(cipher, kid)
         else:
-            self.cipher_key, self.qr_mat, self.qr_note = key, None, None
+            self.cipher_kid, self.qr_mat, self.qr_err = kid, None, None
             self._update_drag_source()
             self._redraw_qr()
         self._set_status(status, err)
 
     def history_back(self, _e=None):
         if self.history and self._state() != self.history[self.hpos]:
-            self._commit()  # несохранённые правки тоже можно будет вернуть стрелкой вперёд
+            self._commit()
         if self.hpos <= 0:
-            self.toast("Раньше операций нет")
+            self.toast(T("Раньше операций нет"))
             return "break"
         self.hpos -= 1
         self._apply_state(self.history[self.hpos])
@@ -816,7 +973,7 @@ class App:
 
     def history_forward(self, _e=None):
         if self.hpos >= len(self.history) - 1:
-            self.toast("Это последняя операция")
+            self.toast(T("Это последняя операция"))
             return "break"
         self.hpos += 1
         self._apply_state(self.history[self.hpos])
@@ -824,6 +981,8 @@ class App:
         return "break"
 
     def _update_nav(self):
+        if not hasattr(self, "back_btn"):
+            return
         for btn, active in ((self.back_btn, self.hpos > 0), (self.fwd_btn, self.hpos < len(self.history) - 1)):
             color = C["space_text"] if active else C["space_dim"]
             btn.configure(fg=color, activeforeground=color)
@@ -849,29 +1008,29 @@ class App:
             phrase = self.phrase.get().strip()
             if not phrase:
                 if feedback:
-                    self.toast("Введите ключ-фразу или вернитесь к списку ключей", error=True)
+                    self.toast(T("Введите ключ-фразу или вернитесь к списку ключей"), error=True)
                     self.phrase_entry.focus_set()
                 return None
-            return core.phrase_key(phrase), phrase
+            return core.phrase_key(phrase), ("phrase", phrase)
         idx = self.combo.current()
         idx = self.auto_idx if idx < 0 else idx
-        return core.key_bytes(idx), self.names[idx]
+        return core.key_bytes(idx), ("list", idx)
 
     def _candidates(self):
         """Сначала выбранный ключ, затем ключ дня и остальные ключи списка."""
         seen, out = set(), []
 
-        def add(key, label, primary=False):
+        def add(key, kid, primary=False):
             if key not in seen:
                 seen.add(key)
-                out.append((key, label, primary))
+                out.append((key, kid, primary))
 
         sel = self._selected_key(feedback=False)
         if sel:
             add(sel[0], sel[1], True)
-        for i in [self.auto_idx] + [i for i in range(len(self.names)) if i != self.auto_idx]:
-            add(core.key_bytes(i), self.names[i])
-        add(core.phrase_key(""), "пустая ключ-фраза")
+        for i in [self.auto_idx] + [i for i in range(len(core.BUILTIN_KEYS)) if i != self.auto_idx]:
+            add(core.key_bytes(i), ("list", i))
+        add(core.phrase_key(""), ("empty",))
         return out
 
     def _day_tick(self):
@@ -882,37 +1041,38 @@ class App:
             if self.combo.current() == old:
                 self.combo.current(self.auto_idx)
                 if self.mode.get() == "list":
-                    self.toast(f"Наступил новый день: выбран ключ «{self.names[self.auto_idx]}»")
+                    self.toast(T("Наступил новый день: выбран ключ «{key}»", key=self._key_name(self.auto_idx)))
         self.root.after(60_000, self._day_tick)
 
     # ------------------------------------------------------------------ шифрование
     def encrypt(self, _event=None):
         text = self.msg_get()
         if not text.strip():
-            self.toast("Сначала напишите сообщение", error=True)
+            self.toast(T("Сначала напишите сообщение"), error=True)
             self.msg.focus_set()
             return "break"
         sel = self._selected_key(feedback=True)
         if sel is None:
             return "break"
-        key, label = sel
+        key, kid = sel
         try:
             b32 = core.b32encode(core.encrypt(text, key))
         except Exception as e:
-            self.toast(f"Ошибка при шифровании: {e}", error=True)
+            self.toast(T("Ошибка при шифровании: {e}", e=e), error=True)
             return "break"
         self.stop_sound()
+        self.stop_sstv()
         self._set_b32(b32)
         self._set_morse(self._morse_for(b32), src=b32)
-        self._show_qr(b32, label)
-        self._set_status(f"Зашифровано ключом «{label}». В шифровке {len(b32)} знаков.")
+        self._show_qr(b32, kid)
+        self._set_status(T("Зашифровано ключом «{key}». В шифровке {n} знаков.", key=self._key_label(kid), n=len(b32)))
         self._commit()
         return "break"
 
     def decrypt_manual(self, _event=None):
         raw = self.b32_get().strip()
         if not raw:
-            self.toast("Вставьте шифровку в поле Base32 или откройте QR-код", error=True)
+            self.toast(T("Вставьте шифровку в поле Base32 или откройте QR-код"), error=True)
             return "break"
         self._decrypt_and_show(raw, explicit=True)
         return "break"
@@ -925,7 +1085,10 @@ class App:
     def _b32_auto(self):
         """Как на телефоне: вставленная шифровка расшифровывается сама."""
         self._b32_job = None
-        raw = self.b32_get().strip()
+        try:
+            raw = self.b32_get().strip()
+        except tk.TclError:
+            return
         if not raw or raw in (self._b32_prog, self._b32_last):
             return
         if morse.is_morse(raw) or core.looks_like_b32(raw):
@@ -936,25 +1099,27 @@ class App:
         if morse.is_morse(raw):
             lat = morse.latin_text(raw)
             if not lat:
-                return self._fail("В морзянке есть сигналы, которых не бывает в шифровке.", explicit)
+                return self._fail(T("В морзянке есть сигналы, которых не бывает в шифровке."), explicit)
             b32 = core.normalize_b32(lat)
             self._set_b32(b32)
         else:
             b32 = core.normalize_b32(raw)
         try:
-            text, label, primary = core.decrypt_any(core.b32decode(b32), self._candidates())
+            text, kid, primary = core.decrypt_any(core.b32decode(b32), self._candidates())
         except core.MarsError as e:
-            return self._fail(str(e), explicit)
+            return self._fail(self._err(e), explicit)
         self.stop_sound()
+        self.stop_sstv()
         self._set(self.msg, text)
         if not keep_morse:
             self._set_morse(self._morse_for(b32), src=b32)
-        self._show_qr(b32, label)
-        self._set_status(f"Расшифровано ключом «{label}».")
+        self._show_qr(b32, kid)
+        label = self._key_label(kid)
+        self._set_status(T("Расшифровано ключом «{key}».", key=label))
         if not primary:
-            self.toast(f"Расшифровано ключом «{label}»")
+            self.toast(T("Расшифровано ключом «{key}»", key=label))
         elif explicit:
-            self.toast("Успешно расшифровано")
+            self.toast(T("Успешно расшифровано"))
         self._commit()
         return True
 
@@ -976,11 +1141,12 @@ class App:
 
     def clear_all(self):
         self.stop_sound()
+        self.stop_sstv()
         self._set(self.msg, "")
         self._set_morse("")
         self._set_b32("")
-        self.qr_mat = self.qr_note = None
-        self.cipher_key = self._b32_last = self._morse_last = ""
+        self.qr_mat = self.qr_err = self.cipher_kid = None
+        self._b32_last = self._morse_last = ""
         self._set_status("")
         self._update_drag_source()
         self._redraw_qr()
@@ -989,7 +1155,7 @@ class App:
 
     # ------------------------------------------------------------------ азбука Морзе
     def _morse_changed(self):
-        if self._playing and self.morse_get() != self._play_text:
+        if self._playing and self.morse_get() != self._play.get("text"):
             self.stop_sound()
         if self._morse_job:
             self.root.after_cancel(self._morse_job)
@@ -998,7 +1164,10 @@ class App:
     def _morse_auto(self):
         """Вставленная морзянка шифровки распознаётся сама."""
         self._morse_job = None
-        raw = self.morse_get().strip()
+        try:
+            raw = self.morse_get().strip()
+        except tk.TclError:
+            return
         if not raw or raw in (self._morse_prog, self._morse_last) or not morse.is_morse(raw):
             return
         lat = morse.latin_text(raw)
@@ -1012,7 +1181,7 @@ class App:
     def morse_enter(self, _event=None):
         raw = self.morse_get().strip()
         if not raw:
-            self.toast("Поле «Азбука Морзе» пустое", error=True)
+            self.toast(T("Поле «Азбука Морзе» пустое"), error=True)
             return "break"
         self.stop_sound()
         if not morse.is_morse(raw):
@@ -1028,21 +1197,21 @@ class App:
             return "break"
         text, lang, unknown = morse.decode(raw, self.morse_cfg["alphabet"])
         self._set(self.msg, text)
-        note = f"Морзянка переведена в текст: {morse.LANG_NAMES[lang]}."
+        note = T("Морзянка переведена в текст: {lang}.", lang=T(morse.LANG_NAMES[lang]))
         if unknown:
-            note += " Неизвестные сигналы: " + " ".join(unknown[:4])
+            note += T(" Неизвестные сигналы: {codes}", codes=" ".join(unknown[:4]))
         self._set_status(note)
-        self.toast("Морзянка переведена в текст")
+        self.toast(T("Морзянка переведена в текст"))
         self._commit()
         return "break"
 
     def _text_to_morse(self, text):
         m, lang = morse.encode(text, self.morse_cfg["alphabet"], self.morse_cfg["separator"])
         if not m:
-            self.toast("Этот текст нельзя передать азбукой Морзе", error=True)
+            self.toast(T("Этот текст нельзя передать азбукой Морзе"), error=True)
             return False
         self._set_morse(m)
-        self._set_status(f"Текст переведён в морзянку: {morse.LANG_NAMES[lang]}.")
+        self._set_status(T("Текст переведён в морзянку: {lang}.", lang=T(morse.LANG_NAMES[lang])))
         self._commit()
         return True
 
@@ -1051,7 +1220,7 @@ class App:
         if not text:
             cipher = self._cipher_in_field()
             if not cipher:
-                self.toast("Нечего передавать: зашифруйте сообщение или вставьте морзянку", error=True)
+                self.toast(T("Нечего передавать: зашифруйте сообщение или вставьте морзянку"), error=True)
                 return None
             self._set_morse(self._morse_for(cipher), src=cipher)
         elif not morse.is_morse(text) and not self._text_to_morse(text):
@@ -1064,54 +1233,104 @@ class App:
         else:
             self.start_sound()
 
+    def _start_index(self, events, b32pos):
+        """С какого сигнала начать: с места курсора в поле шифровки или Морзе."""
+        w = self.root.focus_get()
+        if w is self.morse:
+            off, n = len(self.morse.get("1.0", "insert")), len(self.morse_get())
+            if 0 < off < n:
+                return next((k for k, e in enumerate(events) if e[2] >= off), 0)
+        elif w is self.b32 and b32pos:
+            off = len(self.b32.get("1.0", "insert"))
+            letter = sum(1 for p in b32pos if p < off)
+            if 0 < letter < len(b32pos):
+                return next((k for k, e in enumerate(events) if e[3] >= letter), 0)
+        return 0
+
     def start_sound(self):
         full = self._morse_for_sound()
         if full is None:
             return
-        events, total = morse.timeline(full, self.morse_cfg)
+        events, _ = morse.timeline(full, self.morse_cfg)
         if not events:
-            self.toast("В поле нет сигналов Морзе", error=True)
+            self.toast(T("В поле нет сигналов Морзе"), error=True)
             return
+        self.stop_sstv()
+        b32_text = self.b32_get()
+        pos = [i for i, ch in enumerate(b32_text) if not ch.isspace()]
+        lat = morse.latin_text(full)
+        linked = bool(lat) and core.normalize_b32(b32_text) == lat and len(pos) == events[-1][3] + 1
+        start = self._start_index(events, pos if linked else None)
+        play_events, total = morse.shift(events, start)
+        ranges = {}
+        for _, _, idx, letter in events:
+            a, b = ranges.get(letter, (idx, idx + 1))
+            ranges[letter] = (min(a, idx), max(b, idx + 1))
         folder = os.path.join(tempfile.gettempdir(), "KodMarsa")
         self.player.stop()
         try:
             os.makedirs(folder, exist_ok=True)
             self._wav_n ^= 1  # два файла по очереди: пока один звучит, второй можно переписать
             path = os.path.join(folder, f"morse_{os.getpid()}_{self._wav_n}.wav")
-            morse.render_wav(events, total, self.morse_cfg, path)
+            morse.render_wav(play_events, total, self.morse_cfg, path)
         except Exception as e:
-            self.toast(f"Не удалось подготовить звук: {e}", error=True)
+            self.toast(T("Не удалось подготовить звук: {e}", e=e), error=True)
             return
-        self.morse.tag_remove("played", "1.0", "end")
+        for tag in ("played", "current"):
+            self.morse.tag_remove(tag, "1.0", "end")
+        for tag in ("sent", "sending"):
+            self.b32.tag_remove(tag, "1.0", "end")
         try:
             audible = self.player.play(path)
         except Exception:
             audible = False
         if not audible:
-            self.toast("Звук в этой системе недоступен: передача показана без звука")
-        self._playing, self._play_text = True, full
-        self._play_events, self._play_total, self._play_next = events, total, 0
-        self._play_t0 = time.perf_counter() + 0.05
+            self.toast(T("Звук в этой системе недоступен: передача показана без звука"))
+        self._playing = True
+        self._play = {"text": full, "events": play_events, "total": total, "next": 0, "letter": None,
+                      "ranges": ranges, "pos": pos if linked else None, "t0": time.perf_counter() + 0.05}
         self._tick_sound()
+
+    def _mark_letter(self, letter, done):
+        p = self._play
+        if done:
+            if p["pos"] and letter < len(p["pos"]):
+                i = p["pos"][letter]
+                self.b32.tag_add("sent", f"1.0+{i}c", f"1.0+{i + 1}c")
+            return
+        self.morse.tag_remove("current", "1.0", "end")
+        a, b = p["ranges"].get(letter, (0, 0))
+        self.morse.tag_add("current", f"1.0+{a}c", f"1.0+{b}c")
+        self.morse.see(f"1.0+{a}c")
+        if p["pos"] and letter < len(p["pos"]):
+            i = p["pos"][letter]
+            self.b32.tag_remove("sending", "1.0", "end")
+            self.b32.tag_add("sending", f"1.0+{i}c", f"1.0+{i + 1}c")
+            self.b32.see(f"1.0+{i}c")
 
     def _tick_sound(self):
         if not self._playing:
             return
-        elapsed = (time.perf_counter() - self._play_t0) * 1000.0
-        last = None
-        while self._play_next < len(self._play_events) and self._play_events[self._play_next][0] <= elapsed:
-            idx = self._play_events[self._play_next][2]
+        p = self._play
+        elapsed = (time.perf_counter() - p["t0"]) * 1000.0
+        ev = p["events"]
+        while p["next"] < len(ev) and ev[p["next"]][0] <= elapsed:
+            _, _, idx, letter = ev[p["next"]]
+            if letter != p["letter"]:
+                if p["letter"] is not None:
+                    self._mark_letter(p["letter"], done=True)
+                p["letter"] = letter
+                self._mark_letter(letter, done=False)
             self.morse.tag_add("played", f"1.0+{idx}c", f"1.0+{idx + 1}c")
-            self._play_next += 1
-            last = idx
-        if last is not None:
-            self.morse.see(f"1.0+{last}c")
+            p["next"] += 1
         self._glow_i = self._glow_i % 13 + 1
         self.sound_btn.configure(image=self._snd_frames[self._glow_i])
-        if elapsed >= self._play_total:
+        if elapsed >= p["total"]:
+            if p["letter"] is not None:
+                self._mark_letter(p["letter"], done=True)
             self.stop_sound(finished=True)
             return
-        self._play_job = self.root.after(40, self._tick_sound)
+        self._play_job = self.root.after(30, self._tick_sound)
 
     def stop_sound(self, finished=False):
         if self._play_job:
@@ -1120,10 +1339,16 @@ class App:
         if self._playing and not finished:
             self.player.stop()
         self._playing = False
-        self.sound_btn.configure(image=self._snd_frames[0])
+        try:
+            self.sound_btn.configure(image=self._snd_frames[0])
+            self.morse.tag_remove("current", "1.0", "end")
+            self.b32.tag_remove("sending", "1.0", "end")
+        except tk.TclError:
+            pass
 
     def _set_separator(self, sep):
         self.morse_cfg["separator"] = sep
+        self._save_prefs()
         if self._morse_src and self.morse_get().strip() == self._morse_prog:
             self.stop_sound()
             self._set_morse(self._morse_for(self._morse_src), src=self._morse_src)
@@ -1137,12 +1362,12 @@ class App:
             return
         events, total = morse.timeline(full, self.morse_cfg)
         try:
-            path = unique_path(folder, f"Морзе {dt.datetime.now():%d.%m.%Y %H-%M-%S}.wav")
+            path = unique_path(folder, f"{T('Морзе')} {dt.datetime.now():%d.%m.%Y %H-%M-%S}.wav")
             morse.render_wav(events, total, self.morse_cfg, path)
         except Exception as e:
-            self.toast(f"Не удалось сохранить звук: {e}", error=True)
+            self.toast(T("Не удалось сохранить звук: {e}", e=e), error=True)
             return
-        self.toast(f"Звук Морзе сохранён ({total / 1000:.0f} с) в «Документы\\{OUT_FOLDER}»", folder=folder)
+        self.toast(T("Звук Морзе сохранён ({sec} с) в «Документы\\Код Марса»", sec=round(total / 1000)), folder=folder)
 
     def show_morse_settings(self):
         if self._settings_win is not None and self._settings_win.winfo_exists():
@@ -1151,7 +1376,7 @@ class App:
         cfg, ui = self.morse_cfg, {}
         win = tk.Toplevel(self.root)
         self._settings_win = win
-        win.title("Настройка азбуки Морзе")
+        win.title(T("Настройка азбуки Морзе"))
         win.configure(bg=C["paper"])
         win.transient(self.root)
         win.resizable(False, False)
@@ -1170,8 +1395,9 @@ class App:
             if "fw_scale" in ui:
                 ui["fw_scale"].configure(state="normal" if cfg["farnsworth"] else "disabled")
             if "speed_note" in ui:
-                ui["speed_note"].configure(text=f"Скорость {cfg['wpm']} слов в минуту (стандартное слово "
-                                                f"PARIS): длина точки {1200 / cfg['wpm']:.0f} мс.")
+                ui["speed_note"].configure(text=T("Скорость {wpm} слов в минуту (стандартное слово PARIS): длина точки {ms} мс.",
+                                                  wpm=cfg["wpm"], ms=round(1200 / cfg["wpm"])))
+            self._save_prefs()
 
         def section(title):
             tk.Label(body, text=title, font=self.f_head, fg=C["ink"], bg=C["paper"]).grid(
@@ -1182,10 +1408,8 @@ class App:
 
         def slider(label, key, lo, hi, step, fmt):
             var = tk.IntVar(value=cfg[key])
-            tk.Label(body, text=label, font=self.f_body, fg=C["ink"], bg=C["paper"]).grid(
-                row=row[0], column=0, sticky="w")
-            val = tk.Label(body, text=fmt(cfg[key]), font=self.f_body, fg=C["ink"], bg=C["paper"],
-                           width=6, anchor="e")
+            tk.Label(body, text=label, font=self.f_body, fg=C["ink"], bg=C["paper"]).grid(row=row[0], column=0, sticky="w")
+            val = tk.Label(body, text=fmt(cfg[key]), font=self.f_body, fg=C["ink"], bg=C["paper"], width=6, anchor="e")
 
             def changed(v):
                 cfg[key] = int(float(v))
@@ -1208,47 +1432,40 @@ class App:
             row[0] += 1
             return lbl
 
-        def choice(text, var, value, command):
-            tk.Radiobutton(body, text=text, variable=var, value=value, command=command, font=self.f_body,
-                           bg=C["paper"], fg=C["ink"], activebackground=C["paper"], selectcolor=C["card"],
-                           highlightthickness=0, bd=0, anchor="w", justify="left", wraplength=wrap).grid(
-                row=row[0], column=0, columnspan=3, sticky="w", pady=self.px(2))
-            row[0] += 1
-
-        section("Скорость")
-        slider("Скорость, слов в минуту", "wpm", 5, 40, 1, str)
+        section(T("Скорость"))
+        slider(T("Скорость, слов в минуту"), "wpm", 5, 40, 1, str)
         ui["speed_note"] = note("")
         farn = tk.BooleanVar(value=cfg["farnsworth"])
-        tk.Checkbutton(body, text="Паузы между буквами и словами медленнее (скорость Фарнсворта)", variable=farn,
+        tk.Checkbutton(body, text=T("Паузы между буквами и словами медленнее (скорость Фарнсворта)"), variable=farn,
                        command=lambda: (cfg.__setitem__("farnsworth", farn.get()), refresh()), font=self.f_body,
                        bg=C["paper"], fg=C["ink"], activebackground=C["paper"], selectcolor=C["card"],
                        highlightthickness=0, bd=0, anchor="w", justify="left", wraplength=wrap).grid(
             row=row[0], column=0, columnspan=3, sticky="w", pady=(self.px(6), 0))
         row[0] += 1
-        ui["fw_scale"], ui["fw_var"], ui["fw_val"] = slider("Скорость пауз", "fwpm", 5, 40, 1, str)
-
-        section("Воспроизведение")
-        slider("Частота тона, Гц", "tone", 300, 1200, 10, str)
-        slider("Громкость", "volume", 0, 100, 5, lambda v: f"{v} %")
-        slider("Помехи", "noise", 0, 100, 5, lambda v: f"{v} %")
-
-        section("Разделители в коде Морзе")
+        ui["fw_scale"], ui["fw_var"], ui["fw_val"] = slider(T("Скорость пауз"), "fwpm", 5, 40, 1, str)
+        section(T("Воспроизведение"))
+        slider(T("Частота тона, Гц"), "tone", 300, 1200, 10, str)
+        slider(T("Громкость"), "volume", 0, 100, 5, lambda v: f"{v} %")
+        slider(T("Помехи"), "noise", 0, 100, 5, lambda v: f"{v} %")
+        section(T("Разделители в коде Морзе"))
         sep = tk.StringVar(value=cfg["separator"])
         for key, label, _, _ in morse.SEPARATORS:
-            choice(label, sep, key, lambda: self._set_separator(sep.get()))
-
-        section("Азбука и язык передачи")
+            tk.Radiobutton(body, text=T(label), variable=sep, value=key, command=lambda: self._set_separator(sep.get()),
+                           font=self.f_body, bg=C["paper"], fg=C["ink"], activebackground=C["paper"],
+                           selectcolor=C["card"], highlightthickness=0, bd=0, anchor="w", justify="left",
+                           wraplength=wrap).grid(row=row[0], column=0, columnspan=3, sticky="w", pady=self.px(2))
+            row[0] += 1
+        section(T("Азбука и язык передачи"))
         keys = [k for k, _ in morse.ALPHABET_CHOICES]
         combo = ttk.Combobox(body, state="readonly", style="Mars.TCombobox", font=self.f_body,
-                             values=[n for _, n in morse.ALPHABET_CHOICES])
-        combo.current(keys.index(cfg["alphabet"]))
-        combo.bind("<<ComboboxSelected>>",
-                   lambda e: (cfg.__setitem__("alphabet", keys[combo.current()]), combo.selection_clear()))
+                             values=[T(n) for _, n in morse.ALPHABET_CHOICES])
+        combo.current(keys.index(cfg["alphabet"]) if cfg["alphabet"] in keys else 0)
+        combo.bind("<<ComboboxSelected>>", lambda e: (cfg.__setitem__("alphabet", keys[combo.current()]),
+                                                      combo.selection_clear(), self._save_prefs()))
         combo.grid(row=row[0], column=0, columnspan=3, sticky="ew", pady=(self.px(2), 0))
         row[0] += 1
-        note("При автоопределении азбука выбирается сама: по буквам текста при передаче и по самим "
-             "сигналам при приёме. Шифровка всегда передаётся латиницей, как на телефоне.")
-
+        note(T("При автоопределении азбука выбирается сама: по буквам текста при передаче и по самим сигналам при приёме. "
+               "Шифровка всегда передаётся латиницей, как на телефоне."))
         btns = tk.Frame(body, bg=C["paper"])
         btns.grid(row=row[0], column=0, columnspan=3, sticky="ew", pady=(self.px(18), 0))
 
@@ -1259,12 +1476,123 @@ class App:
             self._set_separator(cfg["separator"])
             self.show_morse_settings()
 
-        self._button(btns, "Прослушать", self.toggle_sound, "primary").pack(side="left")
-        self._button(btns, "Сохранить звук WAV", self.save_wav).pack(side="left", padx=(self.px(8), 0))
-        self._button(btns, "Закрыть", win.destroy).pack(side="right")
-        self._button(btns, "Сброс", reset).pack(side="right", padx=(0, self.px(8)))
+        self._button(btns, T("Прослушать"), self.toggle_sound, "primary").pack(side="left")
+        self._button(btns, T("Сохранить звук WAV"), self.save_wav).pack(side="left", padx=(self.px(8), 0))
+        self._button(btns, T("Закрыть"), win.destroy).pack(side="right")
+        self._button(btns, T("Сброс"), reset).pack(side="right", padx=(0, self.px(8)))
         refresh()
         win.bind("<Escape>", lambda e: win.destroy())
+
+    # ------------------------------------------------------------------ SSTV
+    def _sstv_buttons(self):
+        ready = bool(self.sstv_mode)
+        self.sstv_mode_btn.configure(text=(self.sstv_mode if ready else T("Модель SSTV")) + "  ▾")
+        if not self._sstv_active:
+            self.sstv_btn.configure(text=T("Передать SSTV"), state="normal" if ready else "disabled",
+                                    bg=C["mars"] if ready else C["hover"])
+
+    def _sstv_menu(self):
+        m = self._menu()
+        for name in sstv.MODE_NAMES:
+            m.add_command(label=T("{name}  ·  {sec} с", name=name, sec=round(sstv.duration_ms(name) / 1000)),
+                          command=lambda n=name: self._choose_sstv(n))
+        self._popup_under(m, self.sstv_mode_btn)
+
+    def _choose_sstv(self, name):
+        self.sstv_mode = name
+        self._save_prefs()
+        self._sstv_buttons()
+
+    def toggle_sstv(self):
+        if self._sstv_active:
+            self.stop_sstv()
+            return
+        if not self.sstv_mode:
+            return
+        if self.qr_mat is None:
+            self.toast(T("Сначала зашифруйте сообщение: SSTV передаёт QR-код"), error=True)
+            return
+        self.stop_sound()
+        mode = self.sstv_mode
+        img, mod = sstv.qr_frame(self.qr_mat, mode)
+        if mod < 3:
+            self.toast(T("QR-код слишком мелкий для {mode}: выберите PD 120, PD 180, PD 240 или PD 290", mode=mode),
+                       error=True)
+        self._sstv_active = True
+        self.sstv_btn.configure(text=T("Готовлю SSTV…"))
+        volume = self.morse_cfg.get("volume", 80)
+        self._wav_n ^= 1
+        path = os.path.join(tempfile.gettempdir(), "KodMarsa", f"sstv_{os.getpid()}_{self._wav_n}.wav")
+        result = {}
+
+        def work():
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                sstv.write_wav(sstv.synthesize(img, mode, volume), path)
+                result["path"] = path
+            except Exception as e:
+                result["error"] = e
+
+        threading.Thread(target=work, daemon=True).start()
+        self._sstv_wait(result, mode)
+
+    def _sstv_wait(self, result, mode):
+        if not self._sstv_active:
+            return
+        if not result:
+            self._sstv_job = self.root.after(100, lambda: self._sstv_wait(result, mode))
+            return
+        if "error" in result:
+            self.toast(T("Не удалось подготовить сигнал SSTV: {e}", e=result["error"]), error=True)
+            self.stop_sstv()
+            return
+        self.player.stop()
+        try:
+            audible = self.player.play(result["path"])
+        except Exception:
+            audible = False
+        if not audible:
+            self.toast(T("Звук в этой системе недоступен: передача показана без звука"))
+        self._sstv_run = {"mode": mode, "t0": time.perf_counter() + 0.05, "total": sstv.duration_ms(mode)}
+        self.sstv_btn.configure(text=T("Остановить SSTV"))
+        self._sstv_tick()
+
+    def _sstv_tick(self):
+        if not self._sstv_active:
+            return
+        run = self._sstv_run
+        elapsed = (time.perf_counter() - run["t0"]) * 1000.0
+        self._sstv_frac = sstv.progress(run["mode"], elapsed)
+        self._sstv_overlay()
+        if elapsed >= run["total"]:
+            self.stop_sstv(finished=True)
+            self.toast(T("Передача SSTV завершена"))
+            return
+        self._sstv_job = self.root.after(100, self._sstv_tick)
+
+    def stop_sstv(self, finished=False):
+        if self._sstv_job:
+            self.root.after_cancel(self._sstv_job)
+            self._sstv_job = None
+        if self._sstv_active and not finished:
+            self.player.stop()
+        self._sstv_active, self._sstv_frac = False, None
+        try:
+            self._sstv_buttons()
+            self._sstv_overlay()
+        except tk.TclError:
+            pass
+
+    def _sstv_overlay(self):
+        cv = self.qr_cv
+        cv.delete("sstv")
+        if self._sstv_frac is None or not self._qr_box:
+            return
+        x0, y0, x1, y1 = self._qr_box
+        ys = y0 + (y1 - y0) * self._sstv_frac
+        if ys < y1:
+            cv.create_rectangle(x0, ys, x1, y1, fill="#FFFFFF", stipple="gray50", outline="", tags="sstv")
+        cv.create_line(x0 - self.px(8), ys, x1 + self.px(8), ys, fill=C["mars"], width=self.px(3), tags="sstv")
 
     # ------------------------------------------------------------------ получение QR
     def paste_cipher(self):
@@ -1279,7 +1607,7 @@ class App:
         if img is not None:
             self._receive_image(img)
         else:
-            self.toast("В буфере обмена нет шифровки", error=True)
+            self.toast(T("В буфере обмена нет шифровки"), error=True)
 
     def _clipboard_image(self):
         try:
@@ -1301,17 +1629,16 @@ class App:
 
     def _open_menu(self):
         m = self._menu()
-        m.add_command(label="Из файла…", command=self.open_qr_file)
-        m.add_command(label="Из буфера обмена", command=self.qr_from_clipboard)
-        m.add_command(label="Найти на экране", command=self.qr_from_screen)
-        b = self.open_btn
-        m.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
+        m.add_command(label=T("Из файла…"), command=self.open_qr_file)
+        m.add_command(label=T("Из буфера обмена"), command=self.qr_from_clipboard)
+        m.add_command(label=T("Найти на экране"), command=self.qr_from_screen)
+        self._popup_under(m, self.open_btn)
 
     def open_qr_file(self):
         path = filedialog.askopenfilename(
-            parent=self.root, title="Открыть картинку с QR-кодом",
-            filetypes=[("Изображения", "*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff"),
-                       ("Текст шифровки", "*.txt"), ("Все файлы", "*.*")])
+            parent=self.root, title=T("Открыть картинку с QR-кодом"),
+            filetypes=[(T("Изображения"), "*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff"),
+                       (T("Текст шифровки"), "*.txt"), (T("Все файлы"), "*.*")])
         if path:
             self.open_path(path)
 
@@ -1321,7 +1648,7 @@ class App:
                 with open(path, encoding="utf-8", errors="replace") as fh:
                     text = fh.read()
             except OSError as e:
-                self.toast(f"Не удалось открыть файл: {e}", error=True)
+                self.toast(T("Не удалось открыть файл: {e}", e=e), error=True)
                 return
             if core.looks_like_b32(text) or morse.is_morse(text):
                 self._receive_cipher_text(text)
@@ -1332,7 +1659,7 @@ class App:
             img = Image.open(path)
             img.load()
         except Exception:
-            self.toast("Этот файл не открывается как картинка", error=True)
+            self.toast(T("Этот файл не открывается как картинка"), error=True)
             return
         self._receive_image(img)
 
@@ -1340,9 +1667,9 @@ class App:
         try:
             texts = core.read_qr(img)
         except Exception as e:
-            self.toast(f"Не удалось прочитать QR-код: {e}", error=True)
+            self.toast(T("Не удалось прочитать QR-код: {e}", e=e), error=True)
             return
-        self._receive_qr_texts(texts, "QR-код на картинке не найден")
+        self._receive_qr_texts(texts, T("QR-код на картинке не найден"))
 
     def _receive_qr_texts(self, texts, not_found):
         if not texts:
@@ -1350,14 +1677,14 @@ class App:
             return
         cipher = core.pick_cipher(texts)
         if cipher is None:
-            self.toast("QR-код найден, но в нём не шифровка «Кода Марса»", error=True)
+            self.toast(T("QR-код найден, но в нём не шифровка «Кода Марса»"), error=True)
             return
         self._receive_cipher_text(cipher)
 
     def qr_from_clipboard(self):
         img = self._clipboard_image()
         if img is None:
-            self.toast("В буфере обмена нет картинки. Скопируйте QR-код и повторите", error=True)
+            self.toast(T("В буфере обмена нет картинки. Скопируйте QR-код и повторите"), error=True)
             return
         self._receive_image(img)
 
@@ -1377,18 +1704,19 @@ class App:
             self.root.lift()
             self.root.focus_force()
         if img is None:
-            self.toast("Не удалось сделать снимок экрана", error=True)
+            self.toast(T("Не удалось сделать снимок экрана"), error=True)
             return
         try:
             texts = core.read_qr(img)
         except Exception:
             texts = []
-        self._receive_qr_texts(texts, "На экране не найден QR-код. Откройте его крупнее и повторите")
+        self._receive_qr_texts(texts, T("На экране не найден QR-код. Откройте его крупнее и повторите"))
 
     # ------------------------------------------------------------------ сохранение
     def _need_qr(self):
         if self.qr_mat is None:
-            self.toast(self.qr_note or "QR-кода пока нет: сначала зашифруйте сообщение", error=True)
+            self.toast(self._err(self.qr_err) if self.qr_err else T("QR-кода пока нет: сначала зашифруйте сообщение"),
+                       error=True)
             return False
         return True
 
@@ -1396,7 +1724,7 @@ class App:
         try:
             return output_dir()
         except OSError as e:
-            self.toast(f"Не удалось создать папку «{OUT_FOLDER}» в Документах: {e}", error=True)
+            self.toast(T("Не удалось создать папку «Код Марса» в Документах: {e}", e=e), error=True)
             return None
 
     def save_qr(self):
@@ -1408,28 +1736,28 @@ class App:
         try:
             self._qr_export().save(unique_path(folder, f"QR {dt.datetime.now():%d.%m.%Y %H-%M-%S}.png"))
         except Exception as e:
-            self.toast(f"Не удалось сохранить: {e}", error=True)
+            self.toast(T("Не удалось сохранить: {e}", e=e), error=True)
             return
-        self.toast(f"QR-код сохранён в «Документы\\{OUT_FOLDER}»", folder=folder)
+        self.toast(T("QR-код сохранён в «Документы\\Код Марса»"), folder=folder)
 
     def copy_qr(self):
         if not self._need_qr():
             return
         if not IS_WIN:
-            self.toast("Копирование картинки работает в Windows. Используйте «Сохранить QR»", error=True)
+            self.toast(T("Копирование картинки работает в Windows. Используйте «Сохранить QR»"), error=True)
             return
         try:
             copy_image_to_clipboard(self._qr_export(), self.root.winfo_id())
         except Exception as e:
-            self.toast(f"Не удалось скопировать картинку: {e}", error=True)
+            self.toast(T("Не удалось скопировать картинку: {e}", e=e), error=True)
             return
-        self.toast("QR-код скопирован. Вставьте его в мессенджер: Ctrl+V")
+        self.toast(T("QR-код скопирован. Вставьте его в мессенджер: Ctrl+V"))
 
     def _form_cipher(self):
         """Шифровка для бланка и её номер: дата отправки / порядковый номер в этом сеансе."""
         cipher = self._cipher_in_field()
         if not cipher:
-            self.toast("Сначала зашифруйте сообщение: бланк заполняется шифровкой", error=True)
+            self.toast(T("Сначала зашифруйте сообщение: бланк заполняется шифровкой"), error=True)
             return None
         if cipher not in self.form_numbers:
             self.form_seq += 1
@@ -1443,18 +1771,19 @@ class App:
         if not folder:
             return
         number, when = self.form_numbers[cipher]
+        stem = f"{T('Шифровка')} {number.replace('/', '-')}"
         try:
             pages = forms.render_png_pages(resource("assets", "form_blank.png"), cipher,
-                                           self.cipher_key or "—", number, when)
-            stem = forms.file_stem(number)
+                                           self._key_label(self.cipher_kid), number, when, i18n.form_labels())
             for i, img in enumerate(pages, 1):
-                img.save(unique_path(folder, f"{stem}.png" if len(pages) == 1 else f"{stem} (лист {i}).png"))
+                name = f"{stem}.png" if len(pages) == 1 else f"{stem} {T('(лист {i})', i=i)}.png"
+                img.save(unique_path(folder, name))
         except Exception as e:
-            self.toast(f"Не удалось сохранить бланк: {e}", error=True)
+            self.toast(T("Не удалось сохранить бланк: {e}", e=e), error=True)
             return
         n = len(pages)
-        self.toast(f"Бланк {number} сохранён: {n} {plural(n, 'лист', 'листа', 'листов')} PNG "
-                   f"в «Документы\\{OUT_FOLDER}»", folder=folder)
+        self.toast(T("Бланк {number} сохранён: {n} {sheets} PNG в «Документы\\Код Марса»", number=number, n=n,
+                     sheets=i18n.plural(n, ("лист", "листа", "листов"))), folder=folder)
 
     def form_docx(self):
         cipher = self._form_cipher()
@@ -1463,14 +1792,15 @@ class App:
             return
         number, when = self.form_numbers[cipher]
         try:
-            forms.build_docx(resource("assets", "form_blank.png"), cipher, self.cipher_key or "—", number,
-                             unique_path(folder, f"{forms.file_stem(number)}.docx"), when)
+            forms.build_docx(resource("assets", "form_blank.png"), cipher, self._key_label(self.cipher_kid), number,
+                             unique_path(folder, f"{T('Шифровка')} {number.replace('/', '-')}.docx"), when,
+                             i18n.form_labels())
         except Exception as e:
-            self.toast(f"Не удалось сохранить бланк Word: {e}", error=True)
+            self.toast(T("Не удалось сохранить бланк: {e}", e=e), error=True)
             return
         n = len(forms.paginate(forms.groups_of(cipher)))
-        self.toast(f"Бланк {number} для Word сохранён ({n} {plural(n, 'лист', 'листа', 'листов')}) "
-                   f"в «Документы\\{OUT_FOLDER}»", folder=folder)
+        self.toast(T("Бланк {number} для Word сохранён ({n} {sheets}) в «Документы\\Код Марса»", number=number, n=n,
+                     sheets=i18n.plural(n, ("лист", "листа", "листов"))), folder=folder)
 
     # ------------------------------------------------------------------ перетаскивание
     def _setup_dnd(self):
@@ -1528,12 +1858,14 @@ class App:
         return (COPY, DND_FILES, (path,))
 
     # ------------------------------------------------------------------ клавиатура и меню
-    def _bind_keys(self):
+    def _bind_global(self):
         self.root.bind_all("<F1>", lambda e: self.show_help())
         self.root.bind_all("<Alt-Left>", self.history_back)
         self.root.bind_all("<Alt-Right>", self.history_forward)
         if IS_WIN:
             self.root.bind_all("<Control-KeyPress>", self._ctrl_fix, add="+")
+
+    def _bind_widgets(self):
         self.msg.bind("<Return>", self.encrypt)
         self.msg.bind("<KP_Enter>", self.encrypt)
         self.msg.bind("<Shift-Return>", lambda e: self._newline(self.msg))
@@ -1581,7 +1913,7 @@ class App:
     def _bs_fire(self):
         self._bs_job = None
         self.clear_all()
-        self.toast("Все поля очищены")
+        self.toast(T("Все поля очищены"))
 
     def _text_menu(self, event, widget=None):
         w = widget or event.widget
@@ -1593,17 +1925,17 @@ class App:
             has_sel = False
         get_all = (lambda: w.get("1.0", "end-1c")) if is_text else w.get
         m = self._menu()
-        m.add_command(label="Вырезать", command=lambda: w.event_generate("<<Cut>>"),
+        m.add_command(label=T("Вырезать"), command=lambda: w.event_generate("<<Cut>>"),
                       state="normal" if has_sel else "disabled")
         if has_sel:
-            m.add_command(label="Копировать", command=lambda: w.event_generate("<<Copy>>"))
+            m.add_command(label=T("Копировать"), command=lambda: w.event_generate("<<Copy>>"))
         else:
-            m.add_command(label="Копировать всё", command=lambda: self._copy(get_all(), "Скопировано"))
-        m.add_command(label="Вставить",
+            m.add_command(label=T("Копировать всё"), command=lambda: self._copy(get_all(), T("Скопировано")))
+        m.add_command(label=T("Вставить"),
                       command=self.paste_cipher if w is self.b32 else (lambda: w.event_generate("<<Paste>>")))
         m.add_separator()
         if is_text:
-            m.add_command(label="Выделить всё", command=lambda: w.tag_add("sel", "1.0", "end-1c"))
+            m.add_command(label=T("Выделить всё"), command=lambda: w.tag_add("sel", "1.0", "end-1c"))
         if w is self.b32:
             clear = lambda: self._set_b32("")
         elif w is self.morse:
@@ -1612,21 +1944,25 @@ class App:
             clear = lambda: self._set(w, "")
         else:
             clear = lambda: w.delete(0, "end")
-        m.add_command(label="Очистить поле", command=clear)
+        m.add_command(label=T("Очистить поле"), command=clear)
+        if w is self.b32 or w is self.morse:
+            m.add_separator()
+            self._add_share(m, text_fn=get_all)
         m.tk_popup(event.x_root, event.y_root)
 
     def _qr_menu(self, event):
         m = self._menu()
-        m.add_command(label="Сохранить QR", command=self.save_qr)
-        m.add_command(label="Копировать QR", command=self.copy_qr)
+        m.add_command(label=T("Сохранить QR"), command=self.save_qr)
+        m.add_command(label=T("Копировать QR"), command=self.copy_qr)
+        self._add_share(m, image=True)
         m.add_separator()
-        m.add_command(label="Открыть QR из файла…", command=self.open_qr_file)
-        m.add_command(label="Вставить QR из буфера обмена", command=self.qr_from_clipboard)
-        m.add_command(label="Найти QR на экране", command=self.qr_from_screen)
+        m.add_command(label=T("Открыть QR из файла…"), command=self.open_qr_file)
+        m.add_command(label=T("Вставить QR из буфера обмена"), command=self.qr_from_clipboard)
+        m.add_command(label=T("Найти QR на экране"), command=self.qr_from_screen)
         m.add_separator()
-        m.add_command(label="Бланк шифровки PNG", command=self.form_png)
-        m.add_command(label="Бланк шифровки Word", command=self.form_docx)
-        m.add_command(label=f"Открыть папку «{OUT_FOLDER}»", command=lambda: open_folder(output_dir()))
+        m.add_command(label=T("Бланк шифровки PNG"), command=self.form_png)
+        m.add_command(label=T("Бланк шифровки Word"), command=self.form_docx)
+        m.add_command(label=T("Открыть папку «Код Марса»"), command=lambda: open_folder(output_dir()))
         m.tk_popup(event.x_root, event.y_root)
 
     # ------------------------------------------------------------------ уведомления и справка
@@ -1642,7 +1978,7 @@ class App:
         except tk.TclError:
             pass
         if folder:
-            text += "\nНажмите здесь, чтобы открыть папку."
+            text += T("\nНажмите здесь, чтобы открыть папку.")
         lbl = tk.Label(win, text=text, font=self.f_body, fg="#FFFFFF", bg=C["mars"] if error else C["space"],
                        padx=self.px(18), pady=self.px(10), wraplength=self.px(520), justify="center")
         lbl.pack()
@@ -1670,7 +2006,7 @@ class App:
             self._help_win.lift()
             return
         win = tk.Toplevel(self.root)
-        win.title("Справка — Код Марса")
+        win.title(T("Справка — Код Марса"))
         win.configure(bg=C["paper"])
         win.geometry(f"{self.px(660)}x{self.px(600)}")
         t = tk.Text(win, wrap="word", font=self.f_text, bg=C["card"], fg=C["ink"], relief="flat",
@@ -1680,10 +2016,10 @@ class App:
         sb.pack(side="right", fill="y", pady=self.px(14))
         t.pack(fill="both", expand=True, padx=(self.px(14), 0), pady=self.px(14))
         t.tag_configure("h", font=self.f_head, spacing1=self.px(12), spacing3=self.px(4))
-        for i, (title, body) in enumerate(HELP):
+        for i, (title, body) in enumerate(i18n.help_sections()):
             t.insert("end", ("" if i == 0 else "\n") + title + "\n", "h")
             t.insert("end", body + "\n")
-        t.insert("end", f"\nВерсия {core.APP_VERSION} для компьютера.")
+        t.insert("end", f"\n{T('Код Марса')} v{core.APP_VERSION}")
         t.configure(state="disabled")
         win.bind("<Escape>", lambda e: win.destroy())
         self._help_win = win
@@ -1730,7 +2066,8 @@ def run_selftest():
     ok = True
     try:
         lines += core.selftest()
-        for name in ("logo.jpg", "background.jpg", "form_blank.png", "icon.png", "icon.ico", "sound.png"):
+        for name in ("logo.jpg", "background.jpg", "form_blank.png", "icon.png", "icon.ico", "sound.png",
+                     "lang.png", "menu.png"):
             assert os.path.isfile(resource("assets", name)), f"нет файла assets/{name}"
         lines.append("картинки программы: на месте")
         sample = core.b32encode(core.encrypt("проверка бланка", core.key_bytes(1)))
@@ -1748,6 +2085,14 @@ def run_selftest():
         morse.render_wav(events, total, morse.DEFAULTS, wav)
         assert len(wav.getvalue()) > 10000
         lines.append("азбука Морзе: язык и звук ок")
+        img, _ = sstv.qr_frame(core.qr_matrix(sample), "Robot 36")
+        assert len(sstv.synthesize(img, "Robot 36")) > sstv.SAMPLE_RATE * 30
+        lines.append("SSTV: сигнал Robot 36 собирается")
+        for code, _, _ in i18n.LANGS:
+            i18n.set_lang(code)
+            assert T("Зашифровать") and i18n.help_sections()
+        i18n.set_lang("ru")
+        lines.append("языки: русский, украинский, польский, английский")
         if not HAS_DND:
             raise AssertionError("модуль tkinterdnd2 не попал в сборку")
         import tkinterdnd2

@@ -22,11 +22,15 @@ import os
 import re
 
 APP_NAME = "Код Марса"
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
 
 
 class MarsError(Exception):
-    """Ошибка, текст которой можно показать пользователю."""
+    """Ошибка, текст которой можно показать пользователю (code — для перевода)."""
+
+    def __init__(self, text, code=None, **params):
+        super().__init__(text)
+        self.code, self.params = code, params
 
 
 # ---------------------------------------------------------------------------
@@ -130,14 +134,14 @@ def decrypt(blob, key):
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
     if len(blob) < 32 or len(blob) % 16:
-        raise MarsError("Шифровка неполная или повреждена: проверьте, что скопирован весь текст.")
+        raise MarsError("Шифровка неполная или повреждена: проверьте, что скопирован весь текст.", code="incomplete")
     dec = Cipher(algorithms.AES(key), modes.CBC(blob[:16])).decryptor()
     padded = dec.update(blob[16:]) + dec.finalize()
     try:
         unpadder = padding.PKCS7(128).unpadder()
         return (unpadder.update(padded) + unpadder.finalize()).decode("utf-8")
     except ValueError:  # сюда же попадает UnicodeDecodeError
-        raise MarsError("Ключ не подходит к этой шифровке.") from None
+        raise MarsError("Ключ не подходит к этой шифровке.", code="wrong_key") from None
 
 
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -156,7 +160,7 @@ def decrypt_any(blob, candidates):
     что результат похож на обычный текст, — так случайные совпадения исключены.
     """
     if len(blob) < 32 or len(blob) % 16:
-        raise MarsError("Шифровка неполная или повреждена: проверьте, что скопирован весь текст.")
+        raise MarsError("Шифровка неполная или повреждена: проверьте, что скопирован весь текст.", code="incomplete")
     for key, label, primary in candidates:
         try:
             text = decrypt(blob, key)
@@ -165,7 +169,7 @@ def decrypt_any(blob, candidates):
         if primary or plausible(text):
             return text, label, primary
     raise MarsError("Не удалось расшифровать: не подошёл ни один ключ. "
-                    "Если сообщение зашифровано ключ-фразой, введите ту же фразу.")
+                    "Если сообщение зашифровано ключ-фразой, введите ту же фразу.", code="no_key")
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +198,7 @@ def b32decode(text):
         v = _B32_INDEX.get(ch)
         if v is None:
             raise MarsError(f"В шифровке недопустимый знак «{ch}». "
-                            "Base32 состоит только из латинских букв A–Z и цифр 2–7.")
+                            "Base32 состоит только из латинских букв A–Z и цифр 2–7.", code="bad_char", ch=ch)
         buf = ((buf << 5) | v) & 0xFFFF
         bits += 5
         if bits >= 8:
@@ -258,7 +262,7 @@ def morse_to_b32(text):
             continue
         ch = _MORSE_TO_LATIN.get(token)
         if ch is None:
-            raise MarsError(f"Неизвестный знак Морзе: {token}")
+            raise MarsError(f"Неизвестный знак Морзе: {token}", code="morse_unknown", token=token)
         out.append(ch)
     return normalize_b32("".join(out))
 
@@ -281,7 +285,7 @@ def qr_matrix(text, border=4):
         except (DataOverflowError, ValueError):
             continue
     raise MarsError("Сообщение слишком длинное для QR-кода. Шифровка и морзянка готовы, "
-                    "их можно отправить текстом.")
+                    "их можно отправить текстом.", code="qr_too_long")
 
 
 def qr_image(matrix, module=8):
