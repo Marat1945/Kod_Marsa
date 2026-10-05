@@ -266,8 +266,8 @@ def _segment(kind, n, tone, vol, noise, variant):
     return out.tobytes()
 
 
-def render_wav(events, total_ms, cfg, target):
-    """Записывает WAV (путь или файловый объект)."""
+def render_pcm(events, total_ms, cfg):
+    """Звук передачи: 16-битные отсчёты (моно, SAMPLE_RATE)."""
     vol = max(0, min(100, int(cfg.get("volume", 80)))) / 100.0
     noise = max(0, min(100, int(cfg.get("noise", 0)))) / 100.0
     tone = max(100, min(4000, int(cfg.get("tone", 880))))
@@ -289,11 +289,28 @@ def render_wav(events, total_ms, cfg, target):
     end = int(round(total_ms * SAMPLE_RATE / 1000.0))
     if end > cursor:
         chunks.append(seg("gap", end - cursor))
+    return b"".join(chunks)
+
+
+def render_wav(events, total_ms, cfg, target):
+    """Записывает WAV (путь или файловый объект)."""
     with wave.open(target, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(SAMPLE_RATE)
-        w.writeframes(b"".join(chunks))
+        w.writeframes(render_pcm(events, total_ms, cfg))
+
+
+def pcm_to_mp3(pcm, sample_rate, bitrate=64):
+    """MP3 из 16-битного моно-звука (кодировщик LAME)."""
+    import lameenc
+
+    enc = lameenc.Encoder()
+    enc.set_bit_rate(bitrate)
+    enc.set_in_sample_rate(sample_rate)
+    enc.set_channels(1)
+    enc.set_quality(2)
+    return bytes(enc.encode(pcm) + enc.flush())
 
 
 class Player:

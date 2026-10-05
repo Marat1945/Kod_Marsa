@@ -501,9 +501,9 @@ class App:
             pass
         if not getattr(self, "_geometry_set", False):
             sw, sh = r.winfo_screenwidth(), r.winfo_screenheight()
-            w, h = min(self.px(1240), sw - self.px(40)), min(self.px(740), sh - self.px(90))
+            w, h = min(self.px(1300), sw - self.px(40)), min(self.px(760), sh - self.px(90))
             r.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 2 - self.px(20))}")
-            r.minsize(min(self.px(1180), w), min(self.px(640), h))
+            r.minsize(min(self.px(1240), w), min(self.px(640), h))
             self._geometry_set = True
         self._build_header()
         body = tk.Frame(r, bg=C["paper"])
@@ -651,14 +651,34 @@ class App:
         self.status.grid(row=2, column=0, sticky="ew", pady=(self.px(6), self.px(12)))
         mid = tk.Frame(f, bg=C["paper"])
         mid.grid(row=3, column=0, sticky="ew", pady=(0, self.px(6)))
-        self._heading(mid, T("Азбука Морзе")).pack(side="left")
-        self.sound_btn = tk.Label(mid, image=self._snd_frames[0], bg=C["paper"], bd=0, cursor="hand2")
+        mid.grid_columnconfigure(1, weight=1)
+        left, right = tk.Frame(mid, bg=C["paper"]), tk.Frame(mid, bg=C["paper"])
+        self._heading(left, T("Азбука Морзе")).pack(side="left")
+        self.sound_btn = tk.Label(left, image=self._snd_frames[0], bg=C["paper"], bd=0, cursor="hand2")
         self.sound_btn.pack(side="left", padx=(self.px(2), 0))
         self.sound_btn.bind("<Button-1>", lambda e: self.toggle_sound())
-        self._button(mid, T("Настройка\nазбуки Морзе"), self.show_morse_settings, font=self.f_btn_small,
-                     padx=6, pady=1).pack(side="right")
-        self._small(mid, T("Копировать"), lambda: self._copy(self.morse_get(), T("Морзянка скопирована"))).pack(
-            side="right", padx=(0, self.px(8)))
+        self._button(left, T("Сохранить\nMorse.mp3"), self.save_morse_mp3, font=self.f_btn_small,
+                     padx=6, pady=1).pack(side="left", padx=(self.px(6), 0))
+        self._small(right, T("Копировать"), lambda: self._copy(self.morse_get(), T("Морзянка скопирована"))).pack(
+            side="left", padx=(0, self.px(8)))
+        self._button(right, T("Настройка\nазбуки Морзе"), self.show_morse_settings, font=self.f_btn_small,
+                     padx=6, pady=1).pack(side="left")
+        left.grid(row=0, column=0, sticky="w")
+
+        def fit(_e=None):
+            """Если места мало, «Копировать» и «Настройка» уходят на вторую строку, а не сжимаются."""
+            wide = left.winfo_reqwidth() + right.winfo_reqwidth() + self.px(12) <= mid.winfo_width()
+            info = right.grid_info()
+            if info and (int(info["row"]) == 0) == wide:
+                return
+            right.grid_forget()
+            if wide:
+                right.grid(row=0, column=2, sticky="e")
+            else:
+                right.grid(row=1, column=0, columnspan=3, sticky="e", pady=(self.px(4), 0))
+
+        mid.bind("<Configure>", fit)
+        fit()
         box2, self.morse = self._textbox(f, self.f_mono, "word")
         box2.grid(row=4, column=0, sticky="nsew")
         self.morse.tag_configure("played", foreground=C["mars"], underline=True)
@@ -675,8 +695,10 @@ class App:
         self.qr_cv.bind("<Configure>", lambda e: self._schedule_qr_redraw())
         self.qr_cv.bind("<Button-3>", self._qr_menu)
         s = self.px(4)
+        self._button(f, T("Сохранить SSTV.mp3"), self.save_sstv_mp3, font=self.f_btn_small, padx=6).grid(
+            row=1, column=0, sticky="ew", pady=(self.px(8), 0))
         tv = tk.Frame(f, bg=C["paper"])
-        tv.grid(row=1, column=0, sticky="ew", pady=(self.px(8), 0))
+        tv.grid(row=2, column=0, sticky="ew", pady=(self.px(8), 0))
         tv.grid_columnconfigure(0, weight=1, uniform="tv")
         tv.grid_columnconfigure(1, weight=1, uniform="tv")
         self.sstv_btn = self._button(tv, T("Передать SSTV"), self.toggle_sstv, "primary", font=self.f_btn_small, padx=6)
@@ -685,7 +707,7 @@ class App:
         self.sstv_mode_btn.grid(row=0, column=1, sticky="ew", padx=(s, 0))
         self._sstv_buttons()
         g = tk.Frame(f, bg=C["paper"])
-        g.grid(row=2, column=0, sticky="ew", pady=(self.px(8), 0))
+        g.grid(row=3, column=0, sticky="ew", pady=(self.px(8), 0))
         for i in range(3):
             g.grid_columnconfigure(i, weight=1, uniform="q3")
         self._button(g, T("Сохранить QR"), self.save_qr, font=self.f_btn_small, padx=6).grid(
@@ -695,7 +717,7 @@ class App:
         self.open_btn = self._button(g, T("Открыть QR"), self._open_menu, font=self.f_btn_small, padx=6)
         self.open_btn.grid(row=0, column=2, sticky="ew", padx=(s, 0))
         g2 = tk.Frame(f, bg=C["paper"])
-        g2.grid(row=3, column=0, sticky="ew", pady=(self.px(8), 0))
+        g2.grid(row=4, column=0, sticky="ew", pady=(self.px(8), 0))
         g2.grid_columnconfigure(0, weight=1, uniform="q2")
         g2.grid_columnconfigure(1, weight=1, uniform="q2")
         self._button(g2, T("Бланк шифровки\npng"), self.form_png, font=self.f_btn_small, padx=6, pady=3).grid(
@@ -1759,11 +1781,96 @@ class App:
         if not cipher:
             self.toast(T("Сначала зашифруйте сообщение: бланк заполняется шифровкой"), error=True)
             return None
-        if cipher not in self.form_numbers:
+        self._assign_number(cipher)
+        return cipher
+
+    def _assign_number(self, key):
+        """Номер шифровки в этом сеансе («051026/001») — общий для бланков и MP3."""
+        if key not in self.form_numbers:
             self.form_seq += 1
             now = dt.datetime.now()
-            self.form_numbers[cipher] = (forms.form_number(now, self.form_seq), now)
-        return cipher
+            self.form_numbers[key] = (forms.form_number(now, self.form_seq), now)
+        return self.form_numbers[key]
+
+    def _mp3_name(self, prefix, key):
+        number, when = self._assign_number(key)
+        return f"{prefix}{when:%d%m%Y}-{number.split('/')[1]}.mp3"
+
+    def _run_bg(self, work, done):
+        """Долгая работа в фоне, чтобы окно не замирало."""
+        box = {}
+
+        def run():
+            try:
+                box["ok"] = work()
+            except Exception as e:  # покажется уведомлением
+                box["err"] = e
+
+        threading.Thread(target=run, daemon=True).start()
+
+        def poll():
+            if not box:
+                self.root.after(100, poll)
+                return
+            done(box.get("ok"), box.get("err"))
+
+        poll()
+
+    def _mp3_done(self, folder):
+        def done(name, err):
+            if err:
+                self.toast(T("Не удалось сохранить MP3: {e}", e=err), error=True)
+            else:
+                self.toast(T("Сохранено в «Документы\\Код Марса»: {name}", name=name), folder=folder)
+        return done
+
+    def save_morse_mp3(self):
+        full = self._morse_for_sound()
+        folder = self._out_dir() if full is not None else None
+        if not folder:
+            return
+        cipher, lat = self._cipher_in_field(), morse.latin_text(full)
+        key = cipher if cipher and lat and core.normalize_b32(lat) == cipher else "morse:" + full.strip()
+        path = unique_path(folder, self._mp3_name("Morse", key))
+        events, total = morse.timeline(full, self.morse_cfg)
+        cfg = dict(self.morse_cfg)
+        self.toast(T("Готовлю MP3…"))
+
+        def work():
+            data = morse.pcm_to_mp3(morse.render_pcm(events, total, cfg), morse.SAMPLE_RATE, 64)
+            with open(path, "wb") as fh:
+                fh.write(data)
+            return os.path.basename(path)
+
+        self._run_bg(work, self._mp3_done(folder))
+
+    def save_sstv_mp3(self):
+        if not self.sstv_mode:
+            self.toast(T("Сначала выберите модель SSTV"), error=True)
+            return
+        if self.qr_mat is None:
+            self.toast(T("Сначала зашифруйте сообщение: SSTV передаёт QR-код"), error=True)
+            return
+        folder = self._out_dir()
+        if not folder:
+            return
+        mode = self.sstv_mode
+        img, mod = sstv.qr_frame(self.qr_mat, mode)
+        path = unique_path(folder, self._mp3_name("SSTV", self._cipher_in_field() or "qr"))
+        volume = self.morse_cfg.get("volume", 80)
+        if mod < 3:
+            self.toast(T("QR-код слишком мелкий для {mode}: выберите PD 120, PD 180, PD 240 или PD 290", mode=mode),
+                       error=True)
+        else:
+            self.toast(T("Готовлю MP3…"))
+
+        def work():
+            data = morse.pcm_to_mp3(sstv.synthesize(img, mode, volume, rate=22050).tobytes(), 22050, 96)
+            with open(path, "wb") as fh:
+                fh.write(data)
+            return os.path.basename(path)
+
+        self._run_bg(work, self._mp3_done(folder))
 
     def form_png(self):
         cipher = self._form_cipher()
@@ -2088,6 +2195,9 @@ def run_selftest():
         img, _ = sstv.qr_frame(core.qr_matrix(sample), "Robot 36")
         assert len(sstv.synthesize(img, "Robot 36")) > sstv.SAMPLE_RATE * 30
         lines.append("SSTV: сигнал Robot 36 собирается")
+        mp3 = morse.pcm_to_mp3(b"\x00\x00" * 22050, 22050, 64)
+        assert mp3[:1] == b"\xff" or mp3[:3] == b"ID3"
+        lines.append("MP3: кодировщик LAME работает")
         for code, _, _ in i18n.LANGS:
             i18n.set_lang(code)
             assert T("Зашифровать") and i18n.help_sections()

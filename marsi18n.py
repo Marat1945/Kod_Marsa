@@ -290,6 +290,15 @@ TR = {
     "Шифровка": ("Шифровка", "Szyfrogram", "Cipher"),
     "Морзе": ("Морзе", "Morse", "Morse"),
     "(лист {i})": ("(аркуш {i})", "(arkusz {i})", "(sheet {i})"),
+    "Сохранить\nMorse.mp3": ("Зберегти\nMorse.mp3", "Zapisz\nMorse.mp3", "Save\nMorse.mp3"),
+    "Сохранить SSTV.mp3": ("Зберегти SSTV.mp3", "Zapisz SSTV.mp3", "Save SSTV.mp3"),
+    "Готовлю MP3…": ("Готую MP3…", "Przygotowuję MP3…", "Preparing MP3…"),
+    "Сохранено в «Документы\\Код Марса»: {name}": ("Збережено в «Документи\\Код Марса»: {name}",
+                                                   "Zapisano w „Dokumenty\\Код Марса”: {name}",
+                                                   "Saved to “Documents\\Код Марса”: {name}"),
+    "Не удалось сохранить MP3: {e}": ("Не вдалося зберегти MP3: {e}", "Nie udało się zapisać MP3: {e}",
+                                      "Could not save the MP3: {e}"),
+    "Сначала выберите модель SSTV": ("Спочатку оберіть модель SSTV", "Najpierw wybierz tryb SSTV", "Choose an SSTV mode first"),
     # ошибки ядра
     "Шифровка неполная или повреждена: проверьте, что скопирован весь текст.":
         ("Шифровка неповна або пошкоджена: перевірте, що скопійовано весь текст.",
@@ -337,11 +346,13 @@ HELP = [
               "зашифровано ключом другого дня, программа найдёт его сама. Ключ-фраза превращается в ключ через SHA-256."),
     ("Морзе звуком", "Круглый значок звука включает передачу: текущий знак подсвечивается, прозвучавшие сигналы и переданные "
                      "буквы шифровки становятся красными и подчёркнутыми. Поставьте курсор между буквами шифровки или "
-                     "между сигналами Морзе, и передача начнётся с этого места."),
+                     "между сигналами Морзе, и передача начнётся с этого места. Кнопка «Сохранить Morse.mp3» записывает передачу в файл MP3."),
     ("SSTV", "Под QR-кодом выберите модель SSTV и нажмите «Передать SSTV»: картинка QR-кода передаётся звуком для радиоканала, "
-             "ход передачи виден на картинке. Для длинной шифровки выбирайте PD 120, PD 180, PD 240 или PD 290."),
+             "ход передачи виден на картинке. Для длинной шифровки выбирайте PD 120, PD 180, PD 240 или PD 290. "
+             "Кнопка «Сохранить SSTV.mp3» записывает сигнал в файл вида SSTV05102026-001.mp3."),
     ("Бланк шифровки", "Кнопки «Бланк шифровки png» и «doc» сохраняют бланк с номером вида 041026/001, ключом, QR-кодом и "
-                       "шифровкой группами по 5 знаков. В Word поля правятся щелчком, а «Выделить всё» берёт только шифровку."),
+                       "шифровкой группами по 5 знаков. В Word «Выделить всё» берёт только шифровку; номер, дату и другие поля правьте двойным "
+                       "щелчком по ним, а к шифровке вернитесь двойным щелчком по ней."),
     ("Файлы и язык", "Всё созданное сохраняется в «Документы\\Код Марса». Язык выбирается кнопкой слева от «Справки». "
                      "Стрелки ← → возвращают операции этого сеанса; язык и настройки программа помнит всегда."),
     ("Совместимость", "Шифровки полностью совместимы с Android-версией «Код Марса» в обе стороны."),
@@ -358,11 +369,13 @@ HELP_TR = {
                      "зашифроване ключем іншого дня, програма знайде його сама. Ключ-фраза перетворюється на ключ через SHA-256."),
            ("Морзе звуком", "Круглий значок звуку вмикає передачу: поточний знак підсвічується, сигнали, що прозвучали, і передані "
                             "літери шифровки стають червоними й підкресленими. Поставте курсор між літерами шифровки або між "
-                            "сигналами Морзе, і передача почнеться з цього місця."),
+                            "сигналами Морзе, і передача почнеться з цього місця. Кнопка «Зберегти Morse.mp3» записує передачу у файл MP3."),
            ("SSTV", "Під QR-кодом оберіть модель SSTV і натисніть «Передати SSTV»: картинка QR-коду передається звуком для "
-                    "радіоканалу, хід передачі видно на картинці. Для довгої шифровки обирайте PD 120, PD 180, PD 240 або PD 290."),
+                    "радіоканалу, хід передачі видно на картинці. Для довгої шифровки обирайте PD 120, PD 180, PD 240 або PD 290. "
+                    "Кнопка «Зберегти SSTV.mp3» записує сигнал у файл на кшталт SSTV05102026-001.mp3."),
            ("Бланк шифровки", "Кнопки «Бланк шифровки png» і «doc» зберігають бланк із номером на кшталт 041026/001, ключем, "
-                              "QR-кодом і шифровкою групами по 5 знаків. У Word поля правляться клацанням, а «Виділити все» бере лише шифровку."),
+                              "QR-кодом і шифровкою групами по 5 знаків. У Word «Виділити все» бере лише шифровку; номер, дату та інші поля правте подвійним "
+                              "клацанням по них, а до шифровки поверніться подвійним клацанням по ній."),
            ("Файли й мова", "Усе створене зберігається в «Документи\\Код Марса». Мова обирається кнопкою ліворуч від «Довідки». "
                             "Стрілки ← → повертають операції цього сеансу; мову й налаштування програма пам’ятає завжди."),
            ("Сумісність", "Шифровки повністю сумісні з Android-версією «Код Марса» в обидва боки.")],
@@ -377,11 +390,13 @@ HELP_TR = {
                       "zaszyfrowano kluczem innego dnia, program sam go znajdzie. Fraza-klucz zamienia się w klucz przez SHA-256."),
            ("Morse dźwiękiem", "Okrągła ikona dźwięku włącza nadawanie: bieżący znak jest podświetlony, nadane sygnały i litery "
                                "szyfrogramu stają się czerwone i podkreślone. Ustaw kursor między literami szyfrogramu lub między "
-                               "sygnałami Morse’a, a nadawanie zacznie się od tego miejsca."),
+                               "sygnałami Morse’a, a nadawanie zacznie się od tego miejsca. Przycisk „Zapisz Morse.mp3” zapisuje nadawanie do pliku MP3."),
            ("SSTV", "Pod kodem QR wybierz tryb SSTV i naciśnij „Nadaj SSTV”: obraz kodu QR jest nadawany dźwiękiem dla kanału "
-                    "radiowego, postęp widać na obrazie. Dla długiego szyfrogramu wybierz PD 120, PD 180, PD 240 lub PD 290."),
+                    "radiowego, postęp widać na obrazie. Dla długiego szyfrogramu wybierz PD 120, PD 180, PD 240 lub PD 290. "
+                    "Przycisk „Zapisz SSTV.mp3” zapisuje sygnał do pliku w rodzaju SSTV05102026-001.mp3."),
            ("Formularz", "Przyciski „Formularz png” i „doc” zapisują formularz z numerem w rodzaju 041026/001, kluczem, kodem QR i "
-                         "szyfrogramem w grupach po 5 znaków. W Wordzie pola edytuje się kliknięciem, a „Zaznacz wszystko” bierze tylko szyfrogram."),
+                         "szyfrogramem w grupach po 5 znaków. W Wordzie „Zaznacz wszystko” bierze tylko szyfrogram; numer, datę i inne pola "
+                         "edytuj dwuklikiem, a do szyfrogramu wróć dwuklikiem na nim."),
            ("Pliki i język", "Wszystko, co tworzy program, trafia do „Dokumenty\\Код Марса”. Język wybiera się przyciskiem po lewej "
                              "stronie „Pomocy”. Strzałki ← → przywracają operacje tej sesji; język i ustawienia program pamięta zawsze."),
            ("Zgodność", "Szyfrogramy są w pełni zgodne z wersją Android „Kod Marsa” w obie strony.")],
@@ -396,11 +411,13 @@ HELP_TR = {
                     "encrypted with another day's key, the program finds it. A key phrase becomes a key through SHA-256."),
            ("Morse by sound", "The round sound icon starts sending: the current sign is highlighted, sent signals and cipher letters "
                               "turn red and underlined. Put the cursor between cipher letters or between Morse signals and sending "
-                              "starts from that point."),
+                              "starts from that point. The “Save Morse.mp3” button records the transmission to an MP3 file."),
            ("SSTV", "Under the QR code choose an SSTV mode and press “Send SSTV”: the QR picture is sent as sound for a radio channel, "
-                    "and the progress shows on the picture. For long cipher text choose PD 120, PD 180, PD 240 or PD 290."),
+                    "and the progress shows on the picture. For long cipher text choose PD 120, PD 180, PD 240 or PD 290. "
+                    "The “Save SSTV.mp3” button records the signal to a file like SSTV05102026-001.mp3."),
            ("Cipher form", "The “Cipher form png” and “doc” buttons save a form with a number like 041026/001, the key, the QR code "
-                           "and the cipher text in groups of 5. In Word the fields are edited by clicking, and “Select all” takes only the cipher text."),
+                           "and the cipher text in groups of 5. In Word “Select all” takes only the cipher text; edit the number, date and other "
+                           "fields with a double-click, and double-click the cipher text to return."),
            ("Files and language", "Everything the program creates goes to “Documents\\Код Марса”. The language is chosen with the "
                                   "button left of “Help”. The ← → arrows bring back operations of this session; the language and "
                                   "settings are always remembered."),

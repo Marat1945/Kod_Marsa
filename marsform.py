@@ -208,6 +208,10 @@ class _Shapes:
 
     def __init__(self):
         self.n = 0
+        self.fresh = True
+
+    def new_part(self):
+        self.fresh = True
 
     def box(self, x0_px, x1_px, top_tw, height_tw, paragraphs):
         self.n += 1
@@ -219,7 +223,8 @@ class _Shapes:
             f'<w:p><w:pPr><w:spacing w:before="{before}" w:after="0" w:line="{line}" w:lineRule="exact"/>'
             f'<w:jc w:val="{jc}"/>{_rpr(half)}</w:pPr>{runs}</w:p>'
             for jc, line, before, runs, half in paragraphs)
-        first = SHAPETYPE if self.n == 1 else ""
+        first = SHAPETYPE if self.fresh else ""
+        self.fresh = False
         return (f'<w:r><w:pict>{first}<v:shape id="km_box{self.n}" o:spid="_x0000_s{1024 + self.n}" '
                 f'type="#_x0000_t202" style="{style}" filled="f" stroked="f"><v:textbox inset="0,0,0,0">'
                 f'<w:txbxContent>{body}</w:txbxContent></v:textbox></v:shape></w:pict></w:r>')
@@ -250,7 +255,12 @@ def _background(page_no, cx, cy):
         '</wp:anchor></w:drawing></w:r>')
 
 
-def _page_objects(shapes, p, pages, page_groups, total, number, key_label, when, labels, cx, cy):
+def _header_part(shapes, p, pages, page_groups, total, number, key_label, when, labels, cx, cy):
+    """Колонтитул листа: картинка бланка и все поля, кроме самой шифровки.
+
+    Колонтитулы Word не берёт в «Выделить всё», поэтому выделяется и копируется
+    только шифровка. Поля в колонтитуле правятся двойным щелчком."""
+    shapes.new_part()
     x, base, right, height = NUMBER
     pt = round(height * TW / 20 / DIGIT_H)
     scale = max(50, min(100, int(100 * (_x(right) - _x(x)) / (len(number) * ADV * pt * 20))))
@@ -262,7 +272,6 @@ def _page_objects(shapes, p, pages, page_groups, total, number, key_label, when,
              shapes.field(1125, 1735, FILED[1], 10, when.strftime("%d.%m.%Y %H:%M")),
              shapes.field(kx, kright, ky + 11, kpt, key)]
     parts += [shapes.field(a, b, base_px, 10) for a, b, base_px in EMPTY_FIELDS]
-    # счётчики групп — сразу под последней строкой шифровки этого листа
     lines = math.ceil(len(page_groups) / PER_LINE)
     footer = footer_lines(len(page_groups), total, p, pages, labels)
     paragraphs = [("left", 300, 0, _run(line, 22), 22) for line in footer]
@@ -270,11 +279,13 @@ def _page_objects(shapes, p, pages, page_groups, total, number, key_label, when,
                             300 * len(footer) + 60, paragraphs))
     if pages > 1:
         parts.append(shapes.field(2250, PAGE_NO[0], PAGE_NO[1], 16, str(p + 1), jc="right"))
-    return "".join(parts)
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            f'<w:hdr {NS}><w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/>'
+            f'</w:pPr>{"".join(parts)}</w:p></w:hdr>')
 
 
 def build_docx(form_path, b32, key_label, number, target, when=None, labels=LABELS):
-    """Документ Word с листами бланка (target — путь или файловый объект)."""
+    """Документ Word: у каждого листа свой колонтитул с бланком, в тексте — только шифровка."""
     when = when or _dt.datetime.now()
     groups = groups_of(b32)
     pages = paginate(groups)
@@ -285,37 +296,30 @@ def build_docx(form_path, b32, key_label, number, target, when=None, labels=LABE
     adv = ADV * CIPHER_PT * 20
     x0, y0, x1, _ = TEXT_AREA
     gap = int((_x(x1) - _x(x0) - adv / 2 - PER_LINE * 5 * adv) // (PER_LINE - 1))
-    shapes, runs = _Shapes(), []
-    for p, page in enumerate(pages):
-        objects = _page_objects(shapes, p, len(pages), page, len(groups), number, key_label, when, labels, cx, cy)
-        if not page:
-            runs.append(objects)
-        for k, g in enumerate(page):
-            spacing = None if (k % PER_LINE == PER_LINE - 1 or k == len(page) - 1) else gap
-            if k == 0 and p == 0:
-                runs.append(objects)           # первый лист: объекты в самом начале
-            if len(g) == 1:
-                runs.append(_run(g, half, spacing=spacing))
-                if k == 0 and p > 0:
-                    runs.append(objects)
-                continue
-            runs.append(_run(g[0], half))
-            if k == 0 and p > 0:
-                runs.append(objects)           # следующие листы: после первой буквы листа
-            if len(g) > 2:
-                runs.append(_run(g[1:-1], half))
-            runs.append(_run(g[-1], half, spacing=spacing))
     top = _y(y0)
     bottom = PAGE_H_TW - (top + LINES_PER_PAGE * CIPHER_LINE + 200)
-    body = (f'<w:p><w:pPr><w:widowControl w:val="0"/><w:spacing w:before="0" w:after="0" '
-            f'w:line="{CIPHER_LINE}" w:lineRule="exact"/><w:jc w:val="left"/>{_rpr(half)}</w:pPr>'
-            f'{"".join(runs)}</w:p>')
-    document = (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        f'<w:document {NS}><w:body>{body}'
-        f'<w:sectPr><w:pgSz w:w="{PAGE_W_TW}" w:h="{PAGE_H_TW}"/>'
-        f'<w:pgMar w:top="{top}" w:right="{PAGE_W_TW - _x(x1)}" w:bottom="{bottom}" w:left="{_x(x0)}" '
-        'w:header="0" w:footer="0" w:gutter="0"/></w:sectPr></w:body></w:document>')
+
+    def sect(k):
+        return (f'<w:sectPr><w:headerReference w:type="default" r:id="rIdH{k}"/><w:type w:val="nextPage"/>'
+                f'<w:pgSz w:w="{PAGE_W_TW}" w:h="{PAGE_H_TW}"/>'
+                f'<w:pgMar w:top="{top}" w:right="{PAGE_W_TW - _x(x1)}" w:bottom="{bottom}" w:left="{_x(x0)}" '
+                'w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>')
+
+    shapes, headers, body = _Shapes(), [], []
+    for p, page in enumerate(pages):
+        headers.append(_header_part(shapes, p, len(pages), page, len(groups), number, key_label, when, labels, cx, cy))
+        runs = []
+        for k, g in enumerate(page):
+            spacing = None if (k % PER_LINE == PER_LINE - 1 or k == len(page) - 1) else gap
+            if len(g) > 1:
+                runs.append(_run(g[:-1], half))
+            runs.append(_run(g[-1], half, spacing=spacing))
+        end = sect(p + 1) if p < len(pages) - 1 else ""
+        body.append(f'<w:p><w:pPr><w:widowControl w:val="0"/><w:spacing w:before="0" w:after="0" '
+                    f'w:line="{CIPHER_LINE}" w:lineRule="exact"/><w:jc w:val="left"/>{_rpr(half)}{end}</w:pPr>'
+                    f'{"".join(runs)}</w:p>')
+    document = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                f'<w:document {NS}><w:body>{"".join(body)}{sect(len(pages))}</w:body></w:document>')
     styles = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults>'
@@ -332,6 +336,8 @@ def build_docx(form_path, b32, key_label, number, target, when=None, labels=LABE
         'w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/>'
         '</w:compat></w:settings>')
     ct = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+    headers_ct = "".join(f'<Override PartName="/word/header{k}.xml" ContentType="{ct}.header+xml"/>'
+                         for k in range(1, len(headers) + 1))
     content_types = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
@@ -339,7 +345,7 @@ def build_docx(form_path, b32, key_label, number, target, when=None, labels=LABE
         '<Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/>'
         f'<Override PartName="/word/document.xml" ContentType="{ct}.document.main+xml"/>'
         f'<Override PartName="/word/styles.xml" ContentType="{ct}.styles+xml"/>'
-        f'<Override PartName="/word/settings.xml" ContentType="{ct}.settings+xml"/>'
+        f'<Override PartName="/word/settings.xml" ContentType="{ct}.settings+xml"/>{headers_ct}'
         '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
         '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
         '</Types>')
@@ -354,6 +360,10 @@ def build_docx(form_path, b32, key_label, number, target, when=None, labels=LABE
         f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="{pkg}">'
         f'<Relationship Id="rIdStyles" Type="{rel}/styles" Target="styles.xml"/>'
         f'<Relationship Id="rIdSettings" Type="{rel}/settings" Target="settings.xml"/>'
+        + "".join(f'<Relationship Id="rIdH{k}" Type="{rel}/header" Target="header{k}.xml"/>'
+                  for k in range(1, len(headers) + 1)) + '</Relationships>')
+    header_rels = (
+        f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="{pkg}">'
         f'<Relationship Id="rIdBg" Type="{rel}/image" Target="media/blank.png"/></Relationships>')
     core_xml = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -375,4 +385,7 @@ def build_docx(form_path, b32, key_label, number, target, when=None, labels=LABE
         z.writestr("word/styles.xml", styles)
         z.writestr("word/settings.xml", settings)
         z.writestr("word/_rels/document.xml.rels", doc_rels)
+        for k, part in enumerate(headers, 1):
+            z.writestr(f"word/header{k}.xml", part)
+            z.writestr(f"word/_rels/header{k}.xml.rels", header_rels)
         z.writestr("word/media/blank.png", bg.getvalue())

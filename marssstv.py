@@ -84,7 +84,8 @@ def qr_frame(matrix, name):
 class _Synth:
     """Генератор тона с непрерывной фазой и точным счётом времени."""
 
-    def __init__(self, amp):
+    def __init__(self, amp, rate=SAMPLE_RATE):
+        self.rate = rate
         self.table = [int(amp * math.sin(2 * math.pi * i / 4096)) for i in range(4096)]
         self.out = array.array("h")
         self.t = 0.0
@@ -93,8 +94,8 @@ class _Synth:
 
     def tone(self, freq, ms):
         self.t += ms
-        end = int(round(self.t * SAMPLE_RATE / 1000.0))
-        inc = freq * 4096.0 / SAMPLE_RATE
+        end = int(round(self.t * self.rate / 1000.0))
+        inc = freq * 4096.0 / self.rate
         ph, tab, out = self.phase, self.table, self.out
         for _ in range(end - self.n):
             out.append(tab[int(ph) & 4095])
@@ -115,7 +116,7 @@ def _yuv(r, g, b):
     return y, u, v
 
 
-def synthesize(img, name, volume=80):
+def synthesize(img, name, volume=80, rate=SAMPLE_RATE):
     """Звук SSTV для картинки (размер картинки — как у режима). Возвращает array('h')."""
     m = MODES[name]
     w, h, s, kind = m["w"], m["h"], m["scan"], m["kind"]
@@ -124,7 +125,7 @@ def synthesize(img, name, volume=80):
         img = img.resize((w, h))
     px = img.load()
     rows = [[px[x, y] for x in range(w)] for y in range(h)]
-    syn = _Synth(0.7 * 32767 * max(0, min(100, volume)) / 100.0)
+    syn = _Synth(0.7 * 32767 * max(0, min(100, volume)) / 100.0, rate)
     tone, scan, p = syn.tone, syn.scan, s / w
 
     # заголовок VIS: два «лидера» по 1900 Гц, стартовый бит, 7 бит кода, чётность, стоп

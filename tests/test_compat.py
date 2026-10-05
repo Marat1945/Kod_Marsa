@@ -116,6 +116,8 @@ def main():
     wav = io.BytesIO()
     morse.render_wav(events, total_ms, morse.DEFAULTS, wav)
     check(len(wav.getvalue()) > 10000, "звук Морзе")
+    mp3 = morse.pcm_to_mp3(morse.render_pcm(events, total_ms, morse.DEFAULTS), morse.SAMPLE_RATE)
+    check(mp3[:1] == b"\xff" or mp3[:3] == b"ID3", "MP3 морзянки")
 
     # бланк: листы по 112 групп, номера, копирование из Word без пробелов
     form = os.path.join(os.path.dirname(HERE), "assets", "form_blank.png")
@@ -133,8 +135,11 @@ def main():
     body = re.sub(r"<w:txbxContent>.*?</w:txbxContent>", "", xml, flags=re.S)
     check("".join(re.findall(r'<w:t xml:space="preserve">(.*?)</w:t>', body)) == "".join(groups),
           "Word: «Выделить всё» берёт только шифровку, без пробелов")
-    check("Ключ: ванька" in xml and "041026/001" in xml, "Word: номер и ключ на бланке")
-    check(not any("header" in n for n in names), "Word: без колонтитулов")
+    zf = zipfile.ZipFile(docx)
+    hdrs = "".join(zf.read(n).decode("utf-8") for n in names if n.startswith("word/header"))
+    check("<w:pict>" not in xml and "<w:drawing>" not in xml, "Word: в тексте документа только шифровка")
+    check("Ключ: ванька" in hdrs and "041026/001" in hdrs, "Word: номер и ключ на бланке")
+    check(sum(1 for n in names if re.fullmatch(r"word/header\d+\.xml", n)) == len(pages), "Word: бланк на каждом листе")
 
     # языки: все фразы окна переведены на украинский, польский и английский
     import ast
