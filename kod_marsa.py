@@ -132,6 +132,48 @@ def unique_path(folder, name):
     return path
 
 
+def work_area(root):
+    """Экран без панели задач: (x, y, ширина, высота)."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            rect = wintypes.RECT()
+            if ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):
+                return rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+        except Exception:
+            pass
+    return 0, 0, root.winfo_screenwidth(), root.winfo_screenheight() - 48
+
+
+def screen_xy(widget):
+    """Где виджет на экране на самом деле (у окна без системной рамки Tk может ошибаться)."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            pt = wintypes.POINT(0, 0)
+            ctypes.windll.user32.ClientToScreen(widget.winfo_id(), ctypes.byref(pt))
+            return pt.x, pt.y
+        except Exception:
+            pass
+    return widget.winfo_rootx(), widget.winfo_rooty()
+
+
+def cursor_xy(widget):
+    """Где сейчас курсор мыши на экране."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            pt = wintypes.POINT()
+            ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+            return pt.x, pt.y
+        except Exception:
+            pass
+    return widget.winfo_pointerxy()
+
+
 def open_folder(path):
     try:
         if IS_WIN:
@@ -2137,12 +2179,14 @@ class App:
             self._guide_lbl.pack()
         win.title(T("Руководство пользователя"))
         img = Image.open(resource("assets", f"guide_{lang}.jpg"))
-        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        k = min(1.0, (sw - 60) / img.width, (sh - 150) / img.height)
-        self._guide_photo = ImageTk.PhotoImage(img.resize((int(img.width * k), int(img.height * k)), Image.LANCZOS))
+        wx, wy, ww, wh = work_area(self.root)  # картинка целиком над панелью задач, окно у верхнего края
+        k = min(1.0, (ww - 40) / img.width, (wh - self.px(36) - self.px(48)) / img.height)
+        w, h = int(img.width * k), int(img.height * k)
+        self._guide_photo = ImageTk.PhotoImage(img.resize((w, h), Image.LANCZOS))
         self._guide_lbl.configure(image=self._guide_photo)
         for code, b in self._guide_btns.items():
             b.configure(bg="#B3160C" if code == lang else "#1A1714")
+        win.geometry(f"+{wx + max(0, (ww - w) // 2)}+{wy}")
         win.lift()
         win.focus_force()
 
