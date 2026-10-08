@@ -109,14 +109,9 @@ class SkinApp(km.App):
         self._maxed, self._k_normal, self._win_xy = True, None, None
         self._anim_job = self._skin_k = self._guide_win = self._band = self._resize = None
         self._over_qr, self._rotor_dir, self._edge = False, 0, None
+        self._tb = None
         super().__init__(root)
-        if WIN:  # обычное окно без системной рамки: значок на панели задач остаётся
-            try:
-                root.attributes("-alpha", 0.0)
-            except tk.TclError:
-                pass
-        else:
-            root.overrideredirect(True)
+        root.overrideredirect(True)  # без системной рамки; размер окна Tk знает точно
         root.bind("<Alt-F4>", lambda e: self._on_close())
         root.bind("<Control-KeyPress>", self._qr_keys, add="+")
 
@@ -436,8 +431,6 @@ class SkinApp(km.App):
         cv.place(x=0, y=0)
         if old is not None:  # старое окно убираем только когда новое готово — без мигания
             old.destroy()
-        if WIN and r.state() != "withdrawn":
-            r.after(30, lambda: self._frameless(move=True))
 
     def _set_background(self):
         self._bg = self._compose(self._skin["ru" if i18n.lang() == "ru" else "clean"])
@@ -504,6 +497,8 @@ class SkinApp(km.App):
         self.prefs["lang"] = code
         self._save_prefs()
         self.root.title(T("Код Марса"))
+        if self._tb is not None:
+            self._tb.title(T("Код Марса"))
         self._set_background()
         self._overlay(None, 1)
         self._hover_name = None
@@ -835,22 +830,22 @@ class SkinApp(km.App):
         self._pressed = self._hit(e.x, e.y)
         if self._pressed:
             self._overlay(self._pressed, 0.82)
-        elif e.y < self._r((0, 0, 0, 100))[3] and not self._maxed:
-            if WIN:  # окно тащит сама Windows, как за обычный заголовок
-                try:
-                    import ctypes
-                    u = ctypes.windll.user32
-                    u.ReleaseCapture()
-                    u.SendMessageW(self._hwnd(), 0x00A1, 2, 0)
-                    return
-                except Exception:
-                    pass
-            self._drag = (e.x_root - self.root.winfo_x(), e.y_root - self.root.winfo_y())
+        elif e.y < self._r((0, 0, 0, 100))[3]:  # тянем за шапку
+            self._drag = (e.x_root - self.root.winfo_x(), e.y_root - self.root.winfo_y(), e.x_root, e.y_root)
 
     def _on_drag(self, e):
         if self._resize:
             self._resize_move(e)
         elif self._drag:
+            if self._maxed:  # как в Windows: потянули развёрнутое окно — оно становится обычным под курсором
+                if abs(e.x_root - self._drag[2]) + abs(e.y_root - self._drag[3]) > self.kp(12):
+                    self._drag = None
+                    wx, wy, ww, wh = self._work_area()
+                    kn = self._k_normal or 0.88 * min(1.0, (ww - 24) / W0, (wh - 16) / H0)
+                    self._maxed, self._k_normal = False, kn
+                    self._win_xy = (max(wx, e.x_root - round(W0 * kn) // 2), max(wy, e.y_root - self.kp(40)))
+                    self._rebuild_view()
+                return
             self.root.geometry(f"+{e.x_root - self._drag[0]}+{e.y_root - self._drag[1]}")
 
     def _on_release(self, e):
@@ -882,20 +877,7 @@ class SkinApp(km.App):
         return None
 
     # ------------------------------------------------------------------ размер окна
-    def _hwnd(self):
-        import ctypes
-        return ctypes.windll.user32.GetParent(self.root.winfo_id())
-
     def _win_rect(self):
-        if WIN:
-            try:
-                import ctypes
-                from ctypes import wintypes
-                r = wintypes.RECT()
-                ctypes.windll.user32.GetWindowRect(self._hwnd(), ctypes.byref(r))
-                return r.left, r.top, r.right - r.left, r.bottom - r.top
-            except Exception:
-                pass
         return self.root.winfo_x(), self.root.winfo_y(), self.CW, self.CH
 
     def _start_resize(self, e):
@@ -966,39 +948,38 @@ class SkinApp(km.App):
         self._schedule_qr_redraw()
 
     def after_show(self):
-        """Под Windows убираем системную рамку, но окно остаётся обычным: значок на панели задач,
-        Alt+Tab, сворачивание и разворачивание щелчком по значку."""
-        if not WIN:
-            return
-        self._frameless(move=True)
-        self.root.after(80, lambda: self.root.attributes("-alpha", 1.0))
-        self.root.bind("<Map>", lambda e: e.widget is self.root and self.root.after(40, self._frameless), add="+")
+        """Окно без системной рамки не попадает на панель задач Windows, поэтому там его представляет
+        невидимое обычное окно-«ярлык»: щелчок по значку возвращает программу, сворачивание прячет её."""
+        if WIN and self._tb is None:
+            p = self._tb = tk.Toplevel(self.root)
+            p.title(T("Код Марса"))
+            try:
+                p.iconbitmap(km.resource("assets", "icon.ico"))
+            except tk.TclError:
+                pass
+            p.geometry("1x1+0+0")
+            try:
+                p.attributes("-alpha", 0.0)
+            except tk.TclError:
+                pass
+            p.protocol("WM_DELETE_WINDOW", self._on_close)
+            p.bind("<Unmap>", lambda e: e.widget is p and p.state() == "iconic" and self.root.withdraw())
+            p.bind("<Map>", lambda e: e.widget is p and self._bring_front())
+            p.bind("<FocusIn>", lambda e: e.widget is p and self._bring_front())
+        self._bring_front()
 
-    def _frameless(self, move=False):
-        if not WIN:
-            return
-        try:
-            import ctypes
-            u = ctypes.windll.user32
-            hwnd = self._hwnd()
-            if not hwnd:
-                return
-            st = u.GetWindowLongW(hwnd, -16)
-            new = (st & ~(0x00C00000 | 0x00040000 | 0x00010000)) | 0x00080000 | 0x00020000
-            if new != st:
-                u.SetWindowLongW(hwnd, -16, new)
-            ex = u.GetWindowLongW(hwnd, -20)
-            u.SetWindowLongW(hwnd, -20, (ex & ~0x00000080) | 0x00040000)
-            x, y = self.win
-            flags = 0x0004 | 0x0010 | 0x0020 | (0 if move else 0x0002)
-            u.SetWindowPos(hwnd, 0, x, y, self.CW, self.CH, flags)
-        except Exception:  # оформление важнее рамки
-            pass
+    def _bring_front(self):
+        r = self.root
+        if r.state() == "withdrawn":
+            r.deiconify()
+        r.lift()
+        r.after(10, r.focus_force)
 
     def _minimize(self):
         r = self.root
-        if WIN:
-            r.iconify()
+        if self._tb is not None:  # сворачиваем «ярлык» на панели задач, окно прячется вместе с ним
+            self._tb.iconify()
+            r.withdraw()
             return
         r.overrideredirect(False)
         r.iconify()
